@@ -17,6 +17,10 @@ state.settings.dailyGoal ??= 60; // minutes
 state.settings.autoStartFocus ??= false; // off: after a break, the next focus block waits for "I'm back"
 state.subjects ??= [];       // { id, name, color (0–7, see --subj-N in styles.css), hidden }
 state.settings.subjectId ??= null; // last subject picked on the start screen
+state.settings.sound ??= {};       // chime: a key of CHIMES; volume: 0–1
+state.settings.sound.chime ??= 'bells';
+state.settings.sound.volume ??= 0.7;
+state.settings.sound.muted ??= false;
 // Days saved before subjects existed were plain totals; keep them as "no subject".
 for (const [k, v] of Object.entries(state.history)) {
   if (typeof v === 'number') state.history[k] = { none: v };
@@ -602,23 +606,122 @@ function unlockAudio() {
   } catch { audioCtx = null; }
 }
 
-// A short synthesized chime, so no sound files are needed.
-function chime(kind) {
-  if (!audioCtx) return;
-  const notes = kind === 'focus' ? [523, 659, 784] : kind === 'done' ? [523, 659, 784, 1047] : [784, 659, 523];
-  notes.forEach((freq, i) => {
-    const t = audioCtx.currentTime + i * 0.18;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
-    osc.connect(gain).connect(audioCtx.destination);
-    osc.start(t);
-    osc.stop(t + 0.55);
+// Synthesized chimes, so no sound files are needed. Each one rises for focus, falls for a break
+// and plays a longer phrase when the session is done. A note is one oscillator per voice
+// (freq × mult, peak gain), with `step` seconds between notes, an `attack` and a fade out by `decay`.
+const CHIMES = {
+  bells: {
+    name: 'Bells',
+    notes: { focus: [523, 659, 784], break: [784, 659, 523], done: [523, 659, 784, 1047] },
+    voices: [{ type: 'sine', mult: 1, gain: 0.3 }],
+    step: 0.18, attack: 0.02, decay: 0.5,
+  },
+  soft: {
+    name: 'Soft',
+    notes: { focus: [262, 330, 392], break: [392, 330, 262], done: [262, 330, 392, 523] },
+    voices: [{ type: 'triangle', mult: 1, gain: 0.25 }, { type: 'sine', mult: 2, gain: 0.05 }],
+    step: 0.3, attack: 0.12, decay: 1.1,
+  },
+  digital: {
+    name: 'Digital',
+    notes: { focus: [880, 1320], break: [1320, 880], done: [880, 880, 1320, 1320, 1760] },
+    voices: [{ type: 'square', mult: 1, gain: 0.07 }], // square waves sound much louder than sines
+    step: 0.13, attack: 0.005, decay: 0.09,
+  },
+  marimba: {
+    name: 'Marimba',
+    notes: { focus: [392, 494, 587, 784], break: [784, 587, 494, 392], done: [392, 494, 587, 784, 587, 784] },
+    // A quiet overtone four times higher gives the woody "tok" of a marimba bar.
+    voices: [{ type: 'sine', mult: 1, gain: 0.32 }, { type: 'sine', mult: 4, gain: 0.06, decay: 0.08 }],
+    step: 0.13, attack: 0.005, decay: 0.4,
+  },
+};
+
+// Plays kind ('focus' | 'break' | 'done') with the chosen chime, unless sound is muted.
+function chime(kind, chimeKey = state.settings.sound.chime) {
+  const { volume, muted } = state.settings.sound;
+  if (!audioCtx || muted || volume <= 0) return;
+  const c = CHIMES[chimeKey] || CHIMES.bells;
+  const level = volume / 0.7; // the default 70% plays each chime at its designed loudness
+  c.notes[kind].forEach((freq, i) => {
+    const t = audioCtx.currentTime + i * c.step;
+    for (const v of c.voices) {
+      const decay = v.decay ?? c.decay;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = v.type;
+      osc.frequency.value = freq * v.mult;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, v.gain * level), t + c.attack);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + decay + 0.05);
+    }
   });
+}
+
+// Sound panel on the start screen, plus the quick mute button on the timer screen.
+function setMuted(muted) {
+  state.settings.sound.muted = muted;
+  save();
+  renderSound();
+}
+
+function renderSound() {
+  const { chime: picked, volume, muted } = state.settings.sound;
+  const btn = $('muteBtn');
+  btn.textContent = muted ? '🔕' : '🔔';
+  btn.title = muted ? 'Sound is off. Click to turn chimes back on' : 'Mute chimes (library mode)';
+  btn.setAttribute('aria-pressed', muted);
+  $('soundMuted').checked = muted;
+  $('soundVolume').value = Math.round(volume * 100);
+  $('soundVolumeText').textContent = `${Math.round(volume * 100)}%`;
+  document.querySelectorAll('#chimeList input').forEach((r) => { r.checked = r.value === picked; });
+  document.querySelectorAll('#chimeList .play').forEach((b) => {
+    b.disabled = muted;
+    b.title = muted ? 'Sound is muted' : 'Play a preview';
+  });
+}
+
+function initSound() {
+  const list = $('chimeList');
+  for (const [key, c] of Object.entries(CHIMES)) {
+    const li = document.createElement('li');
+    const label = document.createElement('label');
+    label.className = 'check';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'chime';
+    radio.value = key;
+    radio.addEventListener('change', () => {
+      state.settings.sound.chime = key;
+      save();
+      unlockAudio();
+      chime('focus', key);
+    });
+    label.append(radio, c.name);
+    const play = document.createElement('button');
+    play.type = 'button';
+    play.className = 'play';
+    play.textContent = '▶ Play';
+    play.setAttribute('aria-label', `Play ${c.name}`);
+    play.addEventListener('click', () => { unlockAudio(); chime('focus', key); });
+    li.append(label, play);
+    list.appendChild(li);
+  }
+  $('soundVolume').addEventListener('input', () => {
+    state.settings.sound.volume = parseInt($('soundVolume').value, 10) / 100;
+    $('soundVolumeText').textContent = `${$('soundVolume').value}%`;
+    save();
+  });
+  // Preview once the slider is let go, so dragging it doesn't play a burst of chimes.
+  $('soundVolume').addEventListener('change', () => { unlockAudio(); chime('focus'); });
+  $('soundMuted').addEventListener('change', () => setMuted($('soundMuted').checked));
+  $('muteBtn').addEventListener('click', () => setMuted(!state.settings.sound.muted));
+  $('soundBtn').addEventListener('click', () => { renderSound(); $('soundDialog').showModal(); });
+  $('soundClose').addEventListener('click', () => $('soundDialog').close());
+  renderSound();
 }
 
 function requestNotificationPermission() {
@@ -980,6 +1083,7 @@ initSetup();
 initSubjects();
 initSession();
 initStats();
+initSound();
 renderTasks();
 renderTodayCard();
 // A session saved while the app wasn't running (crash, battery died): stop the clock where the

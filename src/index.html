@@ -12,7 +12,10 @@
     <section id="setup" class="screen">
       <header class="top">
         <h1>Study session</h1>
-        <button id="statsBtn">📊 Stats</button>
+        <div class="top-buttons">
+          <button id="soundBtn">🔊 Sound</button>
+          <button id="statsBtn">📊 Stats</button>
+        </div>
       </header>
 
       <div class="card today-card" id="todayCard">
@@ -90,6 +93,7 @@
     <!-- Running session screen -->
     <section id="session" class="screen hidden">
       <div class="timer-wrap">
+        <button id="muteBtn" class="mute-btn" aria-label="Mute chimes">🔔</button>
         <div class="phase" id="phaseLabel">Focus</div>
         <div class="subject-pill" id="subjectPill" hidden></div>
         <div class="ring">
@@ -224,6 +228,24 @@
       <div class="confirm-buttons">
         <button id="confirmNo" class="primary" autofocus></button>
         <button id="confirmYes" class="danger"></button>
+      </div>
+    </dialog>
+
+    <!-- Sound settings; changes save right away -->
+    <dialog id="soundDialog" class="confirm sound-dialog">
+      <h2>Sound</h2>
+      <p>Played when a focus block or break starts, and when the session is done.</p>
+      <ul class="chime-list" id="chimeList" role="radiogroup" aria-label="Chime"></ul>
+      <label class="volume">
+        <span>Volume <span id="soundVolumeText">70%</span></span>
+        <input id="soundVolume" type="range" min="0" max="100" step="5">
+      </label>
+      <label class="check">
+        <input id="soundMuted" type="checkbox">
+        Mute (library mode 🤫)
+      </label>
+      <div class="confirm-buttons">
+        <button id="soundClose" class="primary" autofocus>Close</button>
       </div>
     </dialog>
   </main>
