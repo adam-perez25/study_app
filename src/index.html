@@ -93,6 +93,7 @@
     <!-- Running session screen -->
     <section id="session" class="screen hidden">
       <div class="timer-wrap">
+        <button id="muteBtn" class="mute-btn" aria-label="Mute chimes">🔔</button>
         <div class="phase" id="phaseLabel">Focus</div>
         <div class="subject-pill" id="subjectPill" hidden></div>
         <div class="ring">
@@ -237,6 +238,20 @@
         <p class="summary">“Match Windows” follows the light or dark mode set for apps in Windows.</p>
       </div>
 
+      <div class="card sound-card">
+        <h2>Sound</h2>
+        <p class="summary">Played when a focus block or break starts, and when the session is done. Changes save right away.</p>
+        <ul class="chime-list" id="chimeList" role="radiogroup" aria-label="Chime"></ul>
+        <label class="volume">
+          <span>Volume <span id="soundVolumeText">70%</span></span>
+          <input id="soundVolume" type="range" min="0" max="100" step="5">
+        </label>
+        <label class="check">
+          <input id="soundMuted" type="checkbox">
+          Mute (library mode 🤫)
+        </label>
+      </div>
+
       <div class="card" id="subjectsCard">
         <h2>Subjects</h2>
         <ul id="subjectEditList" class="subject-edit"></ul>
@@ -277,6 +292,7 @@
         <button id="confirmYes" class="danger"></button>
       </div>
     </dialog>
+
   </main>
 
   <script src="app.js"></script>

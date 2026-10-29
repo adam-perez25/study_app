@@ -183,7 +183,10 @@ label.check input { width: 18px; height: 18px; accent-color: var(--accent); }
 #taskListSetup, #taskListLive { max-height: 220px; overflow-y: auto; }
 
 /* Timer */
-.timer-wrap { text-align: center; margin-bottom: 16px; }
+.timer-wrap { text-align: center; margin-bottom: 16px; position: relative; }
+/* Quick mute in the top corner of the timer */
+.mute-btn { position: absolute; top: 0; right: 0; padding: 4px 9px; font-size: 1.1rem; line-height: 1.2; }
+.mute-btn[aria-pressed=true] { border-color: var(--muted); }
 .phase { font-size: 1.1rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: .08em; }
 .ring { position: relative; width: min(280px, 80vw); margin: 12px auto; aspect-ratio: 1; }
 .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
@@ -204,7 +207,7 @@ label.check input { width: 18px; height: 18px; accent-color: var(--accent); }
 body.paused .time { opacity: .5; }
 
 /* Header with a button on the right */
-.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
 .top h1 { margin: 0; }
 
 .row-buttons { display: flex; gap: 8px; }
@@ -375,6 +378,18 @@ body.paused .time { opacity: .5; }
 .confirm h2 { font-size: 1.1rem; margin: 0 0 8px; }
 .confirm p { color: var(--muted); margin: 0 0 18px; }
 .confirm-buttons { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+/* Sound settings popup: scrolls inside itself in short windows */
+.chime-list { list-style: none; margin: 0 0 12px; padding: 0; }
+.chime-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
+.chime-list label.check { margin: 0; flex: 1; }
+.chime-list .play { font-size: .85rem; padding: 4px 10px; }
+.chime-list .play:disabled { opacity: .45; cursor: default; filter: none; }
+.sound-card .volume { color: var(--text); font-size: .9rem; }
+.sound-card .volume > span { display: flex; justify-content: space-between; }
+#soundVolumeText { color: var(--muted); font-variant-numeric: tabular-nums; }
+.sound-card input[type=range] { padding: 0; border: none; background: none; accent-color: var(--accent); }
+.sound-card > label.check { margin: 8px 0 0; }
 
 .tooltip {
   position: fixed; z-index: 10; pointer-events: none;
