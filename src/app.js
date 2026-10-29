@@ -18,6 +18,8 @@ state.settings.autoStartFocus ??= false; // off: after a break, the next focus b
 state.settings.theme ??= 'system'; // 'system' (match Windows), 'light' or 'dark'
 state.subjects ??= [];       // { id, name, color (0–7, see --subj-N in styles.css), hidden }
 state.settings.subjectId ??= null; // last subject picked on the start screen
+state.sessionLog ??= [];     // 'YYYY-MM-DD' of each completed session (older sessions weren't logged)
+state.achievements ??= {};   // { achievementId: ISO date it was unlocked }
 // Days saved before subjects existed were plain totals; keep them as "no subject".
 for (const [k, v] of Object.entries(state.history)) {
   if (typeof v === 'number') state.history[k] = { none: v };
@@ -513,7 +515,10 @@ function finishSession(early = false) {
   $('doneSummary').textContent =
     `${early ? 'Session ended early. ' : ''}You completed ${fmtMinutes(studied)} of focus` +
     (state.tasks.length ? ` and ${done} of ${state.tasks.length} task${state.tasks.length === 1 ? '' : 's'}.` : '.');
-  if (s.focusedMs > 0) state.sessionCount++;
+  if (s.focusedMs > 0) {
+    state.sessionCount++;
+    state.sessionLog.push(dayKey(new Date()));
+  }
   state.session = null;
   save();
   publishTimer(null);
@@ -524,6 +529,19 @@ function finishSession(early = false) {
   if (!early) {
     chime('done');
     notify('Session complete', 'Great work! Time to rest.');
+  }
+  const unlocked = checkAchievements();
+  const list = $('doneAchievements');
+  list.innerHTML = '';
+  for (const a of unlocked) {
+    const li = document.createElement('li');
+    li.textContent = `${a.emoji} Achievement unlocked: ${a.name}!`;
+    list.appendChild(li);
+  }
+  list.hidden = !unlocked.length;
+  if (unlocked.length) {
+    notify(unlocked.length === 1 ? 'Achievement unlocked 🏅' : `${unlocked.length} achievements unlocked 🏅`,
+      unlocked.map((a) => a.name).join(', '));
   }
   document.body.classList.remove('paused');
   renderTasks();
@@ -768,6 +786,7 @@ function renderStats() {
   renderBars(today, goal);
   renderHeatmap(today, goal);
   renderSubjectStats(today);
+  renderAchievements();
 
   let bestDay = null;
   for (const k of Object.keys(state.history)) if (!bestDay || dayMs(k) > bestDay[1]) bestDay = [k, dayMs(k)];
@@ -922,6 +941,96 @@ function renderSubjectEdit() {
   }
 }
 
+// ---------- Achievements ----------
+
+// Each badge unlocks once its metric (see achievementMetrics) reaches the goal.
+const ACHIEVEMENTS = [
+  ...[1, 10, 25, 50, 100].map((n) => ({
+    id: `hours${n}`, emoji: '⏳', metric: 'hours', goal: n, unit: 'h',
+    name: n === 1 ? '1 hour' : `${n} hours`, tip: `Focus for ${n} hour${n === 1 ? '' : 's'} in total`,
+  })),
+  ...[3, 7, 14, 30].map((n) => ({
+    id: `streak${n}`, emoji: '🔥', metric: 'streak', goal: n, unit: 'days',
+    name: `${n}-day streak`, tip: `Study at least ${STREAK_MIN} min a day for ${n} days in a row`,
+  })),
+  ...[1, 10, 50].map((n) => ({
+    id: `sessions${n}`, emoji: '✅', metric: 'sessions', goal: n, unit: n === 1 ? 'session' : 'sessions',
+    name: n === 1 ? 'First session' : `${n} sessions`, tip: n === 1 ? 'Complete your first session' : `Complete ${n} sessions`,
+  })),
+  { id: 'week5', emoji: '📅', metric: 'bestWeek', goal: 5, unit: 'sessions',
+    name: 'Busy week', tip: 'Complete 5 sessions in one week (Monday to Sunday)' },
+  { id: 'goal7', emoji: '🎯', metric: 'goalDays', goal: 7, unit: 'days',
+    name: 'Goal getter', tip: 'Reach your daily goal on 7 different days' },
+];
+
+function achievementMetrics() {
+  const perWeek = {};
+  for (const k of state.sessionLog) {
+    const w = dayKey(startOfWeek(parseKey(k)));
+    perWeek[w] = (perWeek[w] || 0) + 1;
+  }
+  const goalMs = state.settings.dailyGoal * 60000;
+  return {
+    hours: totalMinutes() / 60,
+    streak: streaks().best,
+    sessions: state.sessionCount,
+    bestWeek: Math.max(0, ...Object.values(perWeek)),
+    goalDays: Object.keys(state.history).filter((k) => dayMs(k) >= goalMs).length,
+  };
+}
+
+// Records badges that are newly reached and returns them. Unlocked badges stay unlocked,
+// even if the metric drops later (a broken streak, a reset goal).
+function checkAchievements() {
+  const m = achievementMetrics();
+  const fresh = ACHIEVEMENTS.filter((a) => !state.achievements[a.id] && m[a.metric] >= a.goal);
+  if (!fresh.length) return [];
+  const now = new Date().toISOString();
+  for (const a of fresh) state.achievements[a.id] = now;
+  save();
+  return fresh;
+}
+
+function renderAchievements() {
+  const m = achievementMetrics();
+  const el = $('achievementGrid');
+  el.innerHTML = '';
+  let count = 0;
+  for (const a of ACHIEVEMENTS) {
+    const value = m[a.metric];
+    // Reached during a running session but not recorded yet: show it, the done screen announces it.
+    const when = state.achievements[a.id] || (value >= a.goal ? new Date().toISOString() : null);
+    if (when) count++;
+    const badge = document.createElement('div');
+    badge.className = 'badge' + (when ? ' unlocked' : '');
+    const icon = document.createElement('div');
+    icon.className = 'badge-icon';
+    icon.textContent = a.emoji;
+    const name = document.createElement('div');
+    name.className = 'badge-name';
+    name.textContent = a.name;
+    const sub = document.createElement('div');
+    sub.className = 'badge-sub';
+    badge.append(icon, name, sub);
+    if (when) {
+      const date = new Date(when).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' });
+      sub.textContent = date;
+      badge.dataset.tip = `${a.tip} · unlocked ${date}`;
+    } else {
+      // Hours under 10 get one decimal, so the first badges show progress early on.
+      const shown = a.metric === 'hours' && value < 10 ? Math.floor(value * 10) / 10 : Math.floor(value);
+      sub.textContent = `${shown}/${a.goal} ${a.unit}`;
+      badge.dataset.tip = a.tip;
+      const meter = document.createElement('div');
+      meter.className = 'meter';
+      meter.innerHTML = `<div class="meter-fill" style="width:${Math.min(100, (value / a.goal) * 100)}%"></div>`;
+      badge.appendChild(meter);
+    }
+    el.appendChild(badge);
+  }
+  $('achievementCount').textContent = `${count} of ${ACHIEVEMENTS.length}`;
+}
+
 function initStats() {
   document.querySelectorAll('#subjectPeriod button').forEach((b) => {
     b.addEventListener('click', () => {
@@ -1013,7 +1122,7 @@ function initSettings() {
   $('resetStatsBtn').addEventListener('click', async () => {
     const reset = await askConfirm({
       title: 'Reset all stats?',
-      text: 'This deletes your study history, streak, level and session count. ' +
+      text: 'This deletes your study history, streak, level, session count and achievements. ' +
         'Your tasks and settings stay. This can’t be undone.',
       yes: 'Reset stats',
       no: 'Cancel',
@@ -1021,6 +1130,8 @@ function initSettings() {
     if (!reset) return;
     state.history = {};
     state.sessionCount = 0;
+    state.sessionLog = [];
+    state.achievements = {};
     if (state.session) state.session.focusedMs = 0; // a running session starts counting from now
     save();
   });
@@ -1029,6 +1140,7 @@ function initSettings() {
     state.settings.dailyGoal = Number.isFinite(v) ? Math.min(720, Math.max(5, v)) : 60;
     $('goalInput').value = state.settings.dailyGoal;
     save();
+    if (!state.session) checkAchievements(); // a lower goal can complete "Goal getter" right away
   });
 }
 
@@ -1044,6 +1156,9 @@ initStats();
 initSettings();
 renderTasks();
 renderTodayCard();
+// Give badges you already qualify for without announcing them (e.g. the first run after updating).
+// If a session is being resumed, they wait so its done screen can announce them.
+if (!state.session) checkAchievements();
 // A session saved while the app wasn't running (crash, battery died): stop the clock where the
 // app last was, so time spent with the app closed isn't counted as study. It reopens paused.
 function freezeStaleSession() {
