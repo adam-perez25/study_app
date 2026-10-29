@@ -42,12 +42,14 @@ function createWindow() {
     relaunchDisplayName: 'Study Timer',
   });
 
-  mainWin.on('minimize', () => {
-    if (timer && !miniWin) openMini(true);
-  });
-  mainWin.on('restore', () => {
-    if (miniAuto) closeMini();
-  });
+  // During a session the mini timer pops up whenever the app isn't the active window
+  // (minimized, or you clicked another window) and goes away when you come back to it.
+  const autoOpenMini = () => { if (timer && !miniWin) openMini(true); };
+  const autoCloseMini = () => { if (miniAuto) closeMini(); };
+  mainWin.on('blur', autoOpenMini);
+  mainWin.on('minimize', autoOpenMini);
+  mainWin.on('focus', autoCloseMini);
+  mainWin.on('restore', autoCloseMini);
   // Closing during a session: the app asks (in its own silent popup) whether to end the
   // session, saving the time studied, or keep going. It answers through 'close:answer'.
   let allowClose = false;
@@ -90,7 +92,10 @@ function openMini(auto) {
     title: 'Study Timer',
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     webPreferences: { contextIsolation: true, preload },
+    show: false,
   });
+  // Appear without taking focus, so the window you just switched to stays active
+  miniWin.once('ready-to-show', () => miniWin?.showInactive());
   miniWin.setAlwaysOnTop(true, 'floating');
   miniWin.loadFile(path.join(__dirname, 'src', 'mini.html'));
   miniWin.webContents.on('did-finish-load', () => miniWin?.webContents.send('timer', timer));
