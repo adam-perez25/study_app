@@ -1037,9 +1037,37 @@ function renderSubjectEdit() {
       save();
       renderSubjectEdit();
     });
-    li.append(color, name, hide);
+    const del = document.createElement('button');
+    del.className = 'danger';
+    del.textContent = 'Delete';
+    del.title = 'Delete it for good (its time stays in your stats as “No subject”)';
+    del.addEventListener('click', () => deleteSubject(s));
+    li.append(color, name, hide, del);
     ul.appendChild(li);
   }
+}
+
+// Removes a subject. The time studied for it moves to "No subject", so totals, streak and badges stay.
+async function deleteSubject(s) {
+  const ok = await askConfirm({
+    title: `Delete “${s.name}”?`,
+    text: 'The subject is removed everywhere. The time you studied for it stays in your stats as “No subject”. ' +
+      'This can’t be undone.',
+    yes: 'Delete subject',
+    no: 'Cancel',
+  });
+  if (!ok) return;
+  for (const day of Object.values(state.history)) {
+    if (!day[s.id]) continue;
+    day.none = (day.none || 0) + day[s.id];
+    delete day[s.id];
+  }
+  state.subjects = state.subjects.filter((x) => x !== s);
+  if (state.settings.subjectId === s.id) state.settings.subjectId = null;
+  if (state.session?.subjectId === s.id) state.session.subjectId = null; // the rest of this session counts as "No subject"
+  save();
+  renderSubjectEdit();
+  renderSubjectPicker();
 }
 
 // ---------- Achievements ----------
