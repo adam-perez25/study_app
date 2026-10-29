@@ -20,10 +20,13 @@
   --subj-6: #6250d6;
   --subj-7: #e34948;
   --subj-none: #9aa1ad;
+  color-scheme: light;
 }
 
+/* Dark colours: when Windows is dark (unless Settings says Light), or when Settings says Dark.
+   The two blocks must stay identical. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #14171c;
     --card: #1d2128;
     --text: #e8eaee;
@@ -38,7 +41,25 @@
     --subj-6: #9085e9;
     --subj-7: #e66767;
     --subj-none: #6b7280;
+    color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #14171c;
+  --card: #1d2128;
+  --text: #e8eaee;
+  --muted: #9aa1ad;
+  --border: #2c323c;
+  --subj-0: #3987e5;
+  --subj-1: #d95926;
+  --subj-2: #199e70;
+  --subj-3: #c98500;
+  --subj-4: #d55181;
+  --subj-5: #008300;
+  --subj-6: #9085e9;
+  --subj-7: #e66767;
+  --subj-none: #6b7280;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -289,6 +310,16 @@ body.paused .time { opacity: .5; }
 .period { display: flex; gap: 4px; }
 .period button { font-size: .8rem; padding: 5px 10px; }
 .period button.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+
+/* Settings */
+.top-actions { display: flex; gap: 8px; }
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.segmented button { border: none; border-radius: 0; border-right: 1px solid var(--border); padding: 8px 16px; }
+.segmented button:last-child { border-right: none; }
+.segmented button.active { background: var(--text); color: var(--bg); font-weight: 600; }
+#settings .card h2 { margin-bottom: 12px; }
+#subjectEditList { margin: 0 0 10px; }
+#subjectEditList li:first-child { border-top: none; }
 .subject-bars { display: grid; grid-template-columns: max-content 1fr max-content; gap: 8px 12px; align-items: center; }
 .subject-bars .name { display: flex; align-items: center; gap: 8px; font-size: .9rem; }
 .subject-bars .track { height: 14px; }

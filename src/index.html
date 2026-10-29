@@ -12,7 +12,10 @@
     <section id="setup" class="screen">
       <header class="top">
         <h1>Study session</h1>
-        <button id="statsBtn">📊 Stats</button>
+        <div class="top-actions">
+          <button id="statsBtn">📊 Stats</button>
+          <button id="settingsBtn">⚙ Settings</button>
+        </div>
       </header>
 
       <div class="card today-card" id="todayCard">
@@ -199,19 +202,58 @@
         <div class="reset-row">
           <button id="editSubjectsBtn">Edit subjects</button>
         </div>
-        <ul id="subjectEditList" class="subject-edit hidden"></ul>
       </div>
 
       <div class="card wide">
+        <div class="record"><div class="tile-label">Best day</div><div id="recordDay"></div></div>
+        <p class="summary">A day counts toward your streak once you've focused for at least 10 minutes.</p>
+      </div>
+      </div>
+    </section>
+
+    <!-- Settings screen -->
+    <section id="settings" class="screen hidden">
+      <header class="top">
+        <h1>Settings</h1>
+        <button id="settingsBack">← Back</button>
+      </header>
+
+      <div class="card">
+        <h2>Appearance</h2>
+        <div class="segmented" id="themeChoice" role="radiogroup" aria-label="Appearance">
+          <button data-theme="light" role="radio">Light</button>
+          <button data-theme="dark" role="radio">Dark</button>
+          <button data-theme="system" role="radio">Match Windows</button>
+        </div>
+        <p class="summary">“Match Windows” follows the light or dark mode set for apps in Windows.</p>
+      </div>
+
+      <div class="card" id="subjectsCard">
+        <h2>Subjects</h2>
+        <ul id="subjectEditList" class="subject-edit"></ul>
+        <form id="settingsSubjectForm" class="task-form">
+          <input id="settingsSubjectName" type="text" maxlength="30" placeholder="New subject, e.g. Chemistry" autocomplete="off" aria-label="New subject name">
+          <button type="submit">Add</button>
+        </form>
+        <p class="summary">Click a dot to change its colour. Hiding a subject removes it from the start screen but keeps its time in your stats.</p>
+      </div>
+
+      <div class="card">
+        <h2>Timer</h2>
+        <label class="check">
+          <input id="autoStartFocusSettings" type="checkbox">
+          Start focus blocks automatically after a break
+        </label>
+        <p class="summary">When this is off, the next focus block waits until you click “I’m back”.</p>
         <div class="row">
           <label>Daily goal (minutes) <input id="goalInput" type="number" min="5" max="720" step="5"></label>
-          <div class="record"><div class="tile-label">Best day</div><div id="recordDay"></div></div>
-        </div>
-        <p class="summary">A day counts toward your streak once you've focused for at least 10 minutes.</p>
-        <div class="reset-row">
-          <button id="resetStatsBtn" class="danger">Reset stats</button>
         </div>
       </div>
+
+      <div class="card">
+        <h2>Data</h2>
+        <button id="resetStatsBtn" class="danger">Reset stats</button>
+        <p class="summary">Deletes your study history, streak, level and session count. Tasks, subjects and settings stay.</p>
       </div>
     </section>
 

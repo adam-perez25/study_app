@@ -15,6 +15,7 @@ state.history ??= {};        // { 'YYYY-MM-DD': { subjectId | 'none': focused mi
 state.sessionCount ??= 0;
 state.settings.dailyGoal ??= 60; // minutes
 state.settings.autoStartFocus ??= false; // off: after a break, the next focus block waits for "I'm back"
+state.settings.theme ??= 'system'; // 'system' (match Windows), 'light' or 'dark'
 state.subjects ??= [];       // { id, name, color (0–7, see --subj-N in styles.css), hidden }
 state.settings.subjectId ??= null; // last subject picked on the start screen
 // Days saved before subjects existed were plain totals; keep them as "no subject".
@@ -331,14 +332,18 @@ function renderTasks() {
 let tickHandle = null;
 const RING_LEN = 2 * Math.PI * 90;
 
+const SCREENS = ['setup', 'session', 'done', 'stats', 'settings'];
+function currentScreen() { return SCREENS.find((id) => !$(id).classList.contains('hidden')); }
+
 function show(screen) {
-  for (const id of ['setup', 'session', 'done', 'stats']) $(id).classList.toggle('hidden', id !== screen);
+  for (const id of SCREENS) $(id).classList.toggle('hidden', id !== screen);
   if (screen !== 'session') {
     document.title = 'Study Timer';
     setAccent('focus');
   }
   if (screen === 'setup') { renderTodayCard(); renderSubjectPicker(); }
   if (screen === 'stats') renderStats();
+  if (screen === 'settings') renderSettings();
   window.scrollTo(0, 0);
 }
 
@@ -763,12 +768,10 @@ function renderStats() {
   renderBars(today, goal);
   renderHeatmap(today, goal);
   renderSubjectStats(today);
-  if (!$('subjectEditList').classList.contains('hidden')) renderSubjectEdit();
 
   let bestDay = null;
   for (const k of Object.keys(state.history)) if (!bestDay || dayMs(k) > bestDay[1]) bestDay = [k, dayMs(k)];
   $('recordDay').textContent = bestDay ? `${fmtDuration(bestDay[1] / 60000)} on ${fmtDay(parseKey(bestDay[0]))}` : '—';
-  $('goalInput').value = goal;
 }
 
 // Last 14 days, one bar per day, with the daily goal as a reference line.
@@ -880,7 +883,7 @@ function renderSubjectEdit() {
   const ul = $('subjectEditList');
   ul.innerHTML = '';
   if (!state.subjects.length) {
-    ul.innerHTML = '<li class="empty">No subjects yet. Add them on the start screen.</li>';
+    ul.innerHTML = '<li class="empty">No subjects yet. Add one below.</li>';
     return;
   }
   for (const s of state.subjects) {
@@ -894,7 +897,7 @@ function renderSubjectEdit() {
     color.addEventListener('click', () => {
       s.color = (s.color + 1) % SUBJECT_COLORS;
       save();
-      renderStats();
+      renderSubjectEdit();
     });
     const name = document.createElement('input');
     name.value = s.name;
@@ -904,15 +907,15 @@ function renderSubjectEdit() {
       const v = name.value.trim();
       if (v) s.name = v; else name.value = s.name;
       save();
-      renderStats();
     });
     const hide = document.createElement('button');
     hide.textContent = s.hidden ? 'Show' : 'Hide';
     hide.title = s.hidden ? 'Show it on the start screen again' : 'Remove it from the start screen (its time stays in your stats)';
     hide.addEventListener('click', () => {
       s.hidden = !s.hidden;
+      if (s.hidden && state.settings.subjectId === s.id) state.settings.subjectId = null;
       save();
-      renderStats();
+      renderSubjectEdit();
     });
     li.append(color, name, hide);
     ul.appendChild(li);
@@ -928,35 +931,12 @@ function initStats() {
     });
   });
   $('editSubjectsBtn').addEventListener('click', () => {
-    const list = $('subjectEditList');
-    list.classList.toggle('hidden');
-    $('editSubjectsBtn').textContent = list.classList.contains('hidden') ? 'Edit subjects' : 'Done';
-    if (!list.classList.contains('hidden')) renderSubjectEdit();
+    openSettings();
+    $('subjectsCard').scrollIntoView({ block: 'start' });
   });
   $('statsBtn').addEventListener('click', () => show('stats'));
   $('doneStatsBtn').addEventListener('click', () => show('stats'));
   $('statsBack').addEventListener('click', () => show(state.session ? 'session' : 'setup'));
-  $('resetStatsBtn').addEventListener('click', async () => {
-    const reset = await askConfirm({
-      title: 'Reset all stats?',
-      text: 'This deletes your study history, streak, level and session count. ' +
-        'Your tasks and settings stay. This can’t be undone.',
-      yes: 'Reset stats',
-      no: 'Cancel',
-    });
-    if (!reset) return;
-    state.history = {};
-    state.sessionCount = 0;
-    if (state.session) state.session.focusedMs = 0; // a running session starts counting from now
-    save();
-    renderStats();
-  });
-  $('goalInput').addEventListener('change', () => {
-    const v = parseInt($('goalInput').value, 10);
-    state.settings.dailyGoal = Number.isFinite(v) ? Math.min(720, Math.max(5, v)) : 60;
-    save();
-    renderStats();
-  });
 
   // One shared tooltip for every chart mark with a data-tip.
   const tip = $('tooltip');
@@ -972,14 +952,96 @@ function initStats() {
   });
 }
 
+// ---------- Settings ----------
+
+// 'system' follows Windows' light/dark mode for apps; 'light' and 'dark' force one.
+function applyTheme(theme) {
+  if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+}
+
+let settingsReturn = 'setup'; // the screen Back goes to
+function openSettings() {
+  const from = currentScreen();
+  if (from !== 'settings') settingsReturn = from;
+  show('settings');
+}
+
+function renderSettings() {
+  document.querySelectorAll('#themeChoice button').forEach((b) => {
+    const on = b.dataset.theme === state.settings.theme;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-checked', on);
+  });
+  renderSubjectEdit();
+  $('autoStartFocusSettings').checked = state.settings.autoStartFocus;
+  $('goalInput').value = state.settings.dailyGoal;
+}
+
+function initSettings() {
+  $('settingsBtn').addEventListener('click', openSettings);
+  $('settingsBack').addEventListener('click', () => show(settingsReturn));
+
+  document.querySelectorAll('#themeChoice button').forEach((b) => {
+    b.addEventListener('click', () => {
+      state.settings.theme = b.dataset.theme;
+      save();
+      applyTheme(state.settings.theme);
+      renderSettings();
+    });
+  });
+
+  $('settingsSubjectForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = $('settingsSubjectName').value.trim();
+    if (!name) return $('settingsSubjectName').focus();
+    const existing = state.subjects.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    if (existing) existing.hidden = false; // same name: show it again instead of adding a duplicate
+    else state.subjects.push({ id: `s${Date.now()}`, name, color: nextFreeColor(), hidden: false });
+    save();
+    $('settingsSubjectName').value = '';
+    renderSubjectEdit();
+  });
+
+  // Same setting as the tick box in Block settings on the start screen; keep both in step.
+  $('autoStartFocusSettings').addEventListener('change', () => {
+    state.settings.autoStartFocus = $('autoStartFocusSettings').checked;
+    $('autoStartFocus').checked = state.settings.autoStartFocus;
+    save();
+  });
+
+  $('resetStatsBtn').addEventListener('click', async () => {
+    const reset = await askConfirm({
+      title: 'Reset all stats?',
+      text: 'This deletes your study history, streak, level and session count. ' +
+        'Your tasks and settings stay. This can’t be undone.',
+      yes: 'Reset stats',
+      no: 'Cancel',
+    });
+    if (!reset) return;
+    state.history = {};
+    state.sessionCount = 0;
+    if (state.session) state.session.focusedMs = 0; // a running session starts counting from now
+    save();
+  });
+  $('goalInput').addEventListener('change', () => {
+    const v = parseInt($('goalInput').value, 10);
+    state.settings.dailyGoal = Number.isFinite(v) ? Math.min(720, Math.max(5, v)) : 60;
+    $('goalInput').value = state.settings.dailyGoal;
+    save();
+  });
+}
+
 // ---------- Boot ----------
 
+applyTheme(state.settings.theme);
 bindTaskForm('taskForm', 'taskInput');
 bindTaskForm('taskFormLive', 'taskInputLive');
 initSetup();
 initSubjects();
 initSession();
 initStats();
+initSettings();
 renderTasks();
 renderTodayCard();
 // A session saved while the app wasn't running (crash, battery died): stop the clock where the
