@@ -300,6 +300,36 @@ body.paused .time { opacity: .5; }
 .subject-edit input { flex: 1; }
 .subject-edit li.is-hidden input { color: var(--muted); }
 
+/* Achievements: unlocked badges in green, locked ones greyed out with their progress */
+.badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; }
+.badge {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 12px 8px 10px; text-align: center;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); cursor: default;
+}
+.badge.unlocked {
+  border-color: color-mix(in oklab, var(--break) 45%, var(--card));
+  background: color-mix(in oklab, var(--break) 12%, var(--card));
+}
+.badge:hover { outline: 2px solid var(--border); outline-offset: 1px; }
+.badge-icon { font-size: 1.8rem; line-height: 1.2; }
+.badge:not(.unlocked) .badge-icon { filter: grayscale(1); opacity: .35; }
+.badge:not(.unlocked)::after { content: '🔒'; position: absolute; top: 6px; right: 8px; font-size: .7rem; opacity: .6; }
+.badge-name { font-size: .85rem; font-weight: 600; }
+.badge:not(.unlocked) .badge-name { color: var(--muted); }
+.badge-sub { font-size: .75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.badge.unlocked .badge-sub { color: var(--break); font-weight: 600; }
+.badge .meter { width: 80%; height: 4px; margin-top: 4px; }
+.badge .meter-fill { background: var(--muted); }
+.done-achievements { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.done-achievements[hidden] { display: none; }
+.done-achievements li {
+  padding: 8px 12px; border-radius: 8px; font-weight: 600;
+  background: color-mix(in oklab, var(--break) 14%, var(--card)); color: var(--break);
+}
+
 /* Confirmation popup */
 .confirm {
   border: 1px solid var(--border);
