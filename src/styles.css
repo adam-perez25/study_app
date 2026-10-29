@@ -10,6 +10,16 @@
   --accent: var(--focus);
   --danger: #c0392b;
   --radius: 12px;
+  /* Subject colours: a fixed, colourblind-checked categorical order. A subject keeps its slot. */
+  --subj-0: #2a78d6;
+  --subj-1: #eb6834;
+  --subj-2: #1baf7a;
+  --subj-3: #eda100;
+  --subj-4: #e87ba4;
+  --subj-5: #008300;
+  --subj-6: #6250d6;
+  --subj-7: #e34948;
+  --subj-none: #9aa1ad;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -19,6 +29,15 @@
     --text: #e8eaee;
     --muted: #9aa1ad;
     --border: #2c323c;
+    --subj-0: #3987e5;
+    --subj-1: #d95926;
+    --subj-2: #199e70;
+    --subj-3: #c98500;
+    --subj-4: #d55181;
+    --subj-5: #008300;
+    --subj-6: #9085e9;
+    --subj-7: #e66767;
+    --subj-none: #6b7280;
   }
 }
 
@@ -33,7 +52,7 @@ body {
 }
 
 .app {
-  padding: 24px 16px 32px;
+  padding: 16px 16px 12px;
 }
 .screen { max-width: 640px; margin: 0 auto; }
 #stats { max-width: 940px; }
@@ -49,14 +68,14 @@ body {
 .hidden { display: none !important; }
 
 h1 { font-size: 1.6rem; margin: 0 0 16px; }
-h2 { font-size: 1rem; margin: 0 0 12px; }
+h2 { font-size: 1rem; margin: 0 0 10px; }
 
 .card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
@@ -87,7 +106,7 @@ button {
 button:hover { filter: brightness(.96); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.danger { color: var(--danger); }
-button.big { width: 100%; padding: 14px; font-size: 1.05rem; font-weight: 600; }
+button.big { width: 100%; padding: 12px; font-size: 1.05rem; font-weight: 600; }
 
 .presets { display: flex; gap: 8px; flex-wrap: wrap; }
 .presets button.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
@@ -99,7 +118,7 @@ button.big { width: 100%; padding: 14px; font-size: 1.05rem; font-weight: 600; }
 .plan {
   display: flex;
   gap: 3px;
-  margin-top: 16px;
+  margin-top: 12px;
   height: 14px;
   width: 100%;
 }
@@ -120,11 +139,11 @@ button.big { width: 100%; padding: 14px; font-size: 1.05rem; font-weight: 600; }
   background: rgba(255, 255, 255, .45);
 }
 
-.summary { color: var(--muted); font-size: .9rem; margin: 10px 0 0; }
+.summary { color: var(--muted); font-size: .9rem; margin: 8px 0 0; }
 
 /* Tasks */
 .task-form { display: flex; gap: 8px; }
-.tasks { list-style: none; margin: 12px 0 0; padding: 0; }
+.tasks { list-style: none; margin: 8px 0 0; padding: 0; }
 .tasks li {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 4px;
@@ -162,7 +181,7 @@ button.big { width: 100%; padding: 14px; font-size: 1.05rem; font-weight: 600; }
 body.paused .time { opacity: .5; }
 
 /* Header with a button on the right */
-.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .top h1 { margin: 0; }
 
 .row-buttons { display: flex; gap: 8px; }
@@ -170,6 +189,9 @@ body.paused .time { opacity: .5; }
 
 /* Streak + today's goal */
 .today-card, .streak-card { display: flex; align-items: center; gap: 20px; }
+.today-card { padding-top: 12px; padding-bottom: 12px; }
+.today-card .streak .flame { font-size: 1.3rem; }
+.today-card .streak strong { font-size: 1.4rem; }
 .today-goal { flex: 1; min-width: 0; }
 .streak { display: flex; flex-direction: column; align-items: center; min-width: 64px; }
 .streak .flame { font-size: 1.6rem; line-height: 1; }
@@ -237,6 +259,43 @@ body.paused .time { opacity: .5; }
 .heat-legend .heat-cell { width: 12px; display: inline-block; }
 
 .reset-row { display: flex; justify-content: flex-end; margin-top: 12px; }
+
+/* Subjects */
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+.subject-section { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
+.subject-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  border-radius: 999px; padding: 6px 12px;
+}
+.chip.selected { border: 2px solid var(--chip-color); padding: 5px 11px; font-weight: 600; }
+.chip.add { border-style: dashed; color: var(--muted); }
+.subject-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.subject-form input { flex: 1 1 160px; width: auto; }
+.swatches { display: flex; gap: 6px; }
+.swatch { width: 22px; height: 22px; border-radius: 50%; border: none; padding: 0; }
+.swatch[aria-checked="true"] { outline: 2px solid var(--text); outline-offset: 2px; }
+.subject-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin-top: 8px; padding: 3px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--card); font-size: .9rem;
+}
+
+.by-subject-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.by-subject-head h2 { margin: 0; }
+.period { display: flex; gap: 4px; }
+.period button { font-size: .8rem; padding: 5px 10px; }
+.period button.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+.subject-bars { display: grid; grid-template-columns: max-content 1fr max-content; gap: 8px 12px; align-items: center; }
+.subject-bars .name { display: flex; align-items: center; gap: 8px; font-size: .9rem; }
+.subject-bars .track { height: 14px; }
+.subject-bars .fill { height: 100%; border-radius: 0 4px 4px 0; min-width: 2px; }
+.subject-bars .value { font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.subject-bars .empty { grid-column: 1 / -1; color: var(--muted); font-size: .9rem; }
+.subject-edit { list-style: none; margin: 12px 0 0; padding: 0; }
+.subject-edit li { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--border); }
+.subject-edit input { flex: 1; }
+.subject-edit li.is-hidden input { color: var(--muted); }
 
 /* Confirmation popup */
 .confirm {

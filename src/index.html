@@ -56,6 +56,18 @@
 
         <div class="plan" id="planPreview"></div>
         <p class="summary" id="planSummary"></p>
+
+        <div class="subject-section">
+        <h2>What are you studying?</h2>
+        <div class="subject-chips" id="subjectPicker"></div>
+        <form id="subjectForm" class="subject-form hidden">
+          <input id="subjectName" type="text" maxlength="30" placeholder="Maths" autocomplete="off" aria-label="Subject name">
+          <div class="swatches" id="subjectSwatches" role="radiogroup" aria-label="Subject colour"></div>
+          <button type="submit" class="primary">Add</button>
+          <button type="button" id="subjectCancel">Cancel</button>
+        </form>
+        <p class="summary" id="subjectHint"></p>
+        </div>
       </div>
 
       <div class="card">
@@ -74,6 +86,7 @@
     <section id="session" class="screen hidden">
       <div class="timer-wrap">
         <div class="phase" id="phaseLabel">Focus</div>
+        <div class="subject-pill" id="subjectPill" hidden></div>
         <div class="ring">
           <svg viewBox="0 0 200 200" aria-hidden="true">
             <circle class="track" cx="100" cy="100" r="90"></circle>
@@ -166,6 +179,22 @@
           <i class="heat-cell l0"></i><i class="heat-cell l1"></i><i class="heat-cell l2"></i><i class="heat-cell l3"></i><i class="heat-cell l4"></i>
           <span>Goal reached</span>
         </div>
+      </div>
+
+      <div class="card wide">
+        <div class="by-subject-head">
+          <h2>By subject</h2>
+          <div class="period" id="subjectPeriod" role="group" aria-label="Period">
+            <button data-period="week" class="active">This week</button>
+            <button data-period="month">This month</button>
+            <button data-period="all">All time</button>
+          </div>
+        </div>
+        <div id="subjectBars" class="subject-bars"></div>
+        <div class="reset-row">
+          <button id="editSubjectsBtn">Edit subjects</button>
+        </div>
+        <ul id="subjectEditList" class="subject-edit hidden"></ul>
       </div>
 
       <div class="card wide">

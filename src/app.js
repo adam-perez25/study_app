@@ -11,9 +11,15 @@ const state = load() || {
   session: null, // { blocks, index, endsAt, pausedRemaining, startedAt, focusedMs }
 };
 // Fields added after the first version; fill them in for saved data from older versions.
-state.history ??= {};        // { 'YYYY-MM-DD': focused milliseconds }
+state.history ??= {};        // { 'YYYY-MM-DD': { subjectId | 'none': focused milliseconds } }
 state.sessionCount ??= 0;
 state.settings.dailyGoal ??= 60; // minutes
+state.subjects ??= [];       // { id, name, color (0–7, see --subj-N in styles.css), hidden }
+state.settings.subjectId ??= null; // last subject picked on the start screen
+// Days saved before subjects existed were plain totals; keep them as "no subject".
+for (const [k, v] of Object.entries(state.history)) {
+  if (typeof v === 'number') state.history[k] = { none: v };
+}
 
 function load() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { return null; }
@@ -149,6 +155,104 @@ function initSetup() {
   updatePreview();
 }
 
+// ---------- Subjects ----------
+
+const SUBJECT_COLORS = 8;
+let newSubjectColor = 0;
+
+function subjectById(id) { return state.subjects.find((s) => s.id === id) || null; }
+function subjectColor(id) { const s = subjectById(id); return s ? `var(--subj-${s.color})` : 'var(--subj-none)'; }
+function subjectName(id) { return subjectById(id)?.name || 'No subject'; }
+
+// The picked subject, if it still exists and isn't hidden.
+function currentSubjectId() {
+  const s = subjectById(state.settings.subjectId);
+  return s && !s.hidden ? s.id : null;
+}
+
+// First colour no visible subject uses yet, so new subjects look different from the others.
+function nextFreeColor() {
+  const used = new Set(state.subjects.filter((s) => !s.hidden).map((s) => s.color));
+  for (let i = 0; i < SUBJECT_COLORS; i++) if (!used.has(i)) return i;
+  return state.subjects.length % SUBJECT_COLORS;
+}
+
+function renderSubjectPicker() {
+  const el = $('subjectPicker');
+  el.innerHTML = '';
+  const picked = currentSubjectId();
+  for (const s of state.subjects.filter((x) => !x.hidden)) {
+    const chip = document.createElement('button');
+    chip.className = 'chip' + (s.id === picked ? ' selected' : '');
+    chip.style.setProperty('--chip-color', subjectColor(s.id));
+    chip.setAttribute('aria-pressed', s.id === picked);
+    chip.innerHTML = `<span class="dot" style="background:${subjectColor(s.id)}"></span>`;
+    chip.append(s.name);
+    chip.addEventListener('click', () => {
+      state.settings.subjectId = s.id === picked ? null : s.id; // click again to clear
+      save();
+      renderSubjectPicker();
+    });
+    el.appendChild(chip);
+  }
+  const add = document.createElement('button');
+  add.className = 'chip add';
+  add.textContent = '+ New subject';
+  add.addEventListener('click', openSubjectForm);
+  el.appendChild(add);
+
+  // Only needed until the first subject exists; the chips explain themselves after that.
+  const hasSubjects = state.subjects.some((s) => !s.hidden);
+  $('subjectHint').hidden = hasSubjects;
+  $('subjectHint').textContent = 'Optional. Add a subject to see how much time each one gets in your stats.';
+  $('subjectPicker').title = picked ? 'Click the selected subject again to study without one' : '';
+}
+
+function renderSwatches() {
+  const el = $('subjectSwatches');
+  el.innerHTML = '';
+  for (let i = 0; i < SUBJECT_COLORS; i++) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'swatch';
+    b.style.background = `var(--subj-${i})`;
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', i === newSubjectColor);
+    b.setAttribute('aria-label', `Colour ${i + 1}`);
+    b.addEventListener('click', () => { newSubjectColor = i; renderSwatches(); });
+    el.appendChild(b);
+  }
+}
+
+function openSubjectForm() {
+  newSubjectColor = nextFreeColor();
+  renderSwatches();
+  $('subjectForm').classList.remove('hidden');
+  $('subjectName').value = '';
+  $('subjectName').focus();
+}
+
+function initSubjects() {
+  $('subjectForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = $('subjectName').value.trim();
+    if (!name) return $('subjectName').focus();
+    // Same name as an existing subject: show it again and pick it instead of adding a duplicate.
+    let s = state.subjects.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    if (s) s.hidden = false;
+    else {
+      s = { id: `s${Date.now()}`, name, color: newSubjectColor, hidden: false };
+      state.subjects.push(s);
+    }
+    state.settings.subjectId = s.id;
+    save();
+    $('subjectForm').classList.add('hidden');
+    renderSubjectPicker();
+  });
+  $('subjectCancel').addEventListener('click', () => $('subjectForm').classList.add('hidden'));
+  renderSubjectPicker();
+}
+
 // ---------- Tasks ----------
 
 function addTask(text) {
@@ -227,7 +331,7 @@ function show(screen) {
     document.title = 'Study Timer';
     setAccent('focus');
   }
-  if (screen === 'setup') renderTodayCard();
+  if (screen === 'setup') { renderTodayCard(); renderSubjectPicker(); }
   if (screen === 'stats') renderStats();
   window.scrollTo(0, 0);
 }
@@ -239,7 +343,7 @@ function setAccent(type) {
 function startSession() {
   const blocks = buildPlan(state.settings);
   if (!blocks.length) return;
-  state.session = { blocks, index: 0, endsAt: Date.now() + blocks[0].min * 60000, pausedRemaining: null, startedAt: Date.now(), focusedMs: 0 };
+  state.session = { blocks, index: 0, endsAt: Date.now() + blocks[0].min * 60000, pausedRemaining: null, startedAt: Date.now(), focusedMs: 0, subjectId: currentSubjectId() };
   save();
   requestNotificationPermission();
   unlockAudio();
@@ -258,8 +362,9 @@ function creditFocus(elapsedMs) {
   const s = state.session;
   if (s.blocks[s.index].type !== 'focus' || elapsedMs <= 0) return;
   s.focusedMs = (s.focusedMs || 0) + elapsedMs;
-  const key = dayKey(new Date());
-  state.history[key] = (state.history[key] || 0) + elapsedMs;
+  const day = (state.history[dayKey(new Date())] ??= {});
+  const sid = s.subjectId || 'none';
+  day[sid] = (day[sid] || 0) + elapsedMs;
 }
 
 function elapsedInBlock() {
@@ -311,6 +416,14 @@ function tick() {
     ? `Block ${focusIdx} of ${focusTotal}`
     : `Next: block ${focusIdx + 1} of ${focusTotal}`;
 
+  const pill = $('subjectPill');
+  pill.hidden = !s.subjectId;
+  if (s.subjectId && pill.dataset.id !== s.subjectId) {
+    pill.dataset.id = s.subjectId;
+    pill.innerHTML = `<span class="dot" style="background:${subjectColor(s.subjectId)}"></span>`;
+    pill.append(subjectName(s.subjectId));
+  }
+
   const laterMs = s.blocks.slice(s.index + 1).reduce((a, b) => a + b.min * 60000, 0);
   $('totalLeft').textContent = `${fmtClock(remaining + laterMs)} left in the session`;
 
@@ -323,7 +436,9 @@ function tick() {
     type: block.type,
     // Shorter wording so it fits the small window
     label: block.type === 'short' ? 'Break' : LABELS[block.type],
-    blockText: block.type === 'focus' ? $('blockCount').textContent : '',
+    blockText: block.type !== 'focus' ? ''
+      : s.subjectId ? `${subjectName(s.subjectId)} · ${focusIdx}/${focusTotal}`
+      : $('blockCount').textContent,
     endsAt: s.endsAt,
     pausedRemaining: s.pausedRemaining,
     totalMs,
@@ -513,7 +628,8 @@ function dayKey(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d
 function parseKey(k) { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); }
 function addDays(d, n) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() + n); return x; }
 function startOfWeek(d) { return addDays(d, -((d.getDay() + 6) % 7)); } // weeks start on Monday
-function minutesOn(d) { return (state.history[dayKey(d)] || 0) / 60000; }
+function dayMs(k) { return Object.values(state.history[k] || {}).reduce((a, b) => a + b, 0); }
+function minutesOn(d) { return dayMs(dayKey(d)) / 60000; }
 
 function minutesBetween(start, end) { // inclusive
   let total = 0;
@@ -540,7 +656,7 @@ function streaks() {
 
   let best = 0, run = 0, prev = null;
   for (const k of Object.keys(state.history).sort()) {
-    if (state.history[k] < STREAK_MIN * 60000) continue;
+    if (dayMs(k) < STREAK_MIN * 60000) continue;
     run = prev && dayKey(addDays(prev, 1)) === k ? run + 1 : 1;
     best = Math.max(best, run);
     prev = parseKey(k);
@@ -562,7 +678,7 @@ function levelInfo(totalMin) {
   };
 }
 
-function totalMinutes() { return Object.values(state.history).reduce((a, b) => a + b, 0) / 60000; }
+function totalMinutes() { return Object.keys(state.history).reduce((a, k) => a + dayMs(k), 0) / 60000; }
 
 function renderTodayCard() {
   const goal = state.settings.dailyGoal;
@@ -626,9 +742,11 @@ function renderStats() {
 
   renderBars(today, goal);
   renderHeatmap(today, goal);
+  renderSubjectStats(today);
+  if (!$('subjectEditList').classList.contains('hidden')) renderSubjectEdit();
 
   let bestDay = null;
-  for (const [k, ms] of Object.entries(state.history)) if (!bestDay || ms > bestDay[1]) bestDay = [k, ms];
+  for (const k of Object.keys(state.history)) if (!bestDay || dayMs(k) > bestDay[1]) bestDay = [k, dayMs(k)];
   $('recordDay').textContent = bestDay ? `${fmtDuration(bestDay[1] / 60000)} on ${fmtDay(parseKey(bestDay[0]))}` : '—';
   $('goalInput').value = goal;
 }
@@ -685,7 +803,116 @@ function renderHeatmap(today, goal) {
   }
 }
 
+let subjectPeriod = 'week';
+
+// Focused time per subject between two days (inclusive), or over all time.
+function subjectTotals(start, end) {
+  const from = start ? dayKey(start) : '', to = end ? dayKey(end) : '9999';
+  const totals = {};
+  for (const [k, day] of Object.entries(state.history)) {
+    if (k < from || k > to) continue;
+    for (const [sid, ms] of Object.entries(day)) totals[sid] = (totals[sid] || 0) + ms;
+  }
+  return totals;
+}
+
+// One row per subject: visible subjects always (0 shows the one you're skipping),
+// hidden ones and "No subject" only when they have time in the period.
+function renderSubjectStats(today) {
+  const start = subjectPeriod === 'week' ? startOfWeek(today)
+    : subjectPeriod === 'month' ? new Date(today.getFullYear(), today.getMonth(), 1) : null;
+  const totals = subjectTotals(start, start && today);
+  const rows = state.subjects
+    .filter((s) => !s.hidden || totals[s.id] > 0)
+    .map((s) => ({ id: s.id, ms: totals[s.id] || 0 }));
+  if (totals.none > 0) rows.push({ id: null, ms: totals.none });
+  rows.sort((a, b) => b.ms - a.ms);
+
+  const sum = rows.reduce((a, r) => a + r.ms, 0);
+  const max = Math.max(1, ...rows.map((r) => r.ms));
+  const el = $('subjectBars');
+  el.innerHTML = '';
+  if (!rows.length || (!sum && !state.subjects.length)) {
+    el.innerHTML = '<div class="empty">Add subjects on the start screen to see where your time goes.</div>';
+    return;
+  }
+  const period = { week: 'this week', month: 'this month', all: 'in total' }[subjectPeriod];
+  for (const r of rows) {
+    const min = r.ms / 60000;
+    const pct = sum ? Math.round((r.ms / sum) * 100) : 0;
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.innerHTML = `<span class="dot" style="background:${subjectColor(r.id)}"></span>`;
+    name.append(subjectName(r.id));
+    const track = document.createElement('div');
+    track.className = 'track';
+    track.dataset.tip = `${subjectName(r.id)} · ${fmtDuration(min)} ${period}`;
+    track.innerHTML = r.ms ? `<div class="fill" style="width:${(r.ms / max) * 100}%;background:${subjectColor(r.id)}"></div>` : '';
+    const value = document.createElement('div');
+    value.className = 'value';
+    value.textContent = r.ms ? `${fmtShort(min)} · ${pct}%` : '0m';
+    el.append(name, track, value);
+  }
+}
+
+// Rename, recolour (click the dot to cycle) or hide subjects. Hiding keeps past time in stats.
+function renderSubjectEdit() {
+  const ul = $('subjectEditList');
+  ul.innerHTML = '';
+  if (!state.subjects.length) {
+    ul.innerHTML = '<li class="empty">No subjects yet. Add them on the start screen.</li>';
+    return;
+  }
+  for (const s of state.subjects) {
+    const li = document.createElement('li');
+    li.classList.toggle('is-hidden', s.hidden);
+    const color = document.createElement('button');
+    color.className = 'swatch';
+    color.style.background = `var(--subj-${s.color})`;
+    color.title = 'Change colour';
+    color.setAttribute('aria-label', `Change colour of ${s.name}`);
+    color.addEventListener('click', () => {
+      s.color = (s.color + 1) % SUBJECT_COLORS;
+      save();
+      renderStats();
+    });
+    const name = document.createElement('input');
+    name.value = s.name;
+    name.maxLength = 30;
+    name.setAttribute('aria-label', 'Subject name');
+    name.addEventListener('change', () => {
+      const v = name.value.trim();
+      if (v) s.name = v; else name.value = s.name;
+      save();
+      renderStats();
+    });
+    const hide = document.createElement('button');
+    hide.textContent = s.hidden ? 'Show' : 'Hide';
+    hide.title = s.hidden ? 'Show it on the start screen again' : 'Remove it from the start screen (its time stays in your stats)';
+    hide.addEventListener('click', () => {
+      s.hidden = !s.hidden;
+      save();
+      renderStats();
+    });
+    li.append(color, name, hide);
+    ul.appendChild(li);
+  }
+}
+
 function initStats() {
+  document.querySelectorAll('#subjectPeriod button').forEach((b) => {
+    b.addEventListener('click', () => {
+      subjectPeriod = b.dataset.period;
+      document.querySelectorAll('#subjectPeriod button').forEach((x) => x.classList.toggle('active', x === b));
+      renderSubjectStats(new Date());
+    });
+  });
+  $('editSubjectsBtn').addEventListener('click', () => {
+    const list = $('subjectEditList');
+    list.classList.toggle('hidden');
+    $('editSubjectsBtn').textContent = list.classList.contains('hidden') ? 'Edit subjects' : 'Done';
+    if (!list.classList.contains('hidden')) renderSubjectEdit();
+  });
   $('statsBtn').addEventListener('click', () => show('stats'));
   $('doneStatsBtn').addEventListener('click', () => show('stats'));
   $('statsBack').addEventListener('click', () => show(state.session ? 'session' : 'setup'));
@@ -730,6 +957,7 @@ function initStats() {
 bindTaskForm('taskForm', 'taskInput');
 bindTaskForm('taskFormLive', 'taskInputLive');
 initSetup();
+initSubjects();
 initSession();
 initStats();
 renderTasks();
