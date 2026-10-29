@@ -1,5 +1,6 @@
 // Electron entry point: opens the app in its own desktop window, plus the floating mini timer.
-const { app, BrowserWindow, screen, ipcMain } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, shell } = require('electron');
+const fs = require('fs');
 const path = require('path');
 
 // Default window size, never larger than the screen's free space (minus the title bar).
@@ -166,6 +167,25 @@ ipcMain.on('mini:command', (_e, cmd) => {
 // Lets Windows group the taskbar button under the app's own name and icon.
 app.setAppUserModelId('study-timer');
 
+// When it shows a notification, Electron writes its own Start Menu shortcut "Electron.lnk"
+// (Electron's name and icon) with this app's ID, and Windows then shows "Electron" on the
+// notifications. An empty hidden folder with that name stops it from being written, so
+// Windows uses the "Study Timer" shortcut instead.
+function blockElectronShortcut() {
+  if (process.platform !== 'win32' || path.basename(process.execPath).toLowerCase() !== 'electron.exe') return;
+  const link = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Electron.lnk');
+  try {
+    const stat = fs.existsSync(link) ? fs.statSync(link) : null;
+    if (stat?.isDirectory()) return;
+    if (stat) {
+      if (shell.readShortcutLink(link).appUserModelId !== 'study-timer') return; // not ours
+      fs.unlinkSync(link);
+    }
+    fs.mkdirSync(link);
+    require('child_process').execFile('attrib', ['+h', link], () => {});
+  } catch { /* not critical: only affects the notification's name and icon */ }
+}
+
 // Saved data has always lived in %APPDATA%\study-timer; keep it there now that the app
 // has a display name ("Study Timer"), which would otherwise pick a new, empty folder.
 if (path.basename(app.getPath('userData')) === app.getName()) {
@@ -173,6 +193,7 @@ if (path.basename(app.getPath('userData')) === app.getName()) {
 }
 
 app.whenReady().then(() => {
+  blockElectronShortcut();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
