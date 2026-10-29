@@ -16,14 +16,16 @@ function render() {
   if (!timer) return;
   const paused = timer.pausedRemaining != null;
   const remaining = paused ? timer.pausedRemaining : timer.endsAt - Date.now();
-  document.body.className = `${timer.type}${paused ? ' paused' : ''}`;
-  $('phase').textContent = paused ? 'Paused' : timer.label;
-  $('block').textContent = timer.blockText ? `· ${timer.blockText}` : '';
+  // Waiting after a break stays in the focus colour (not paused grey) so it catches your eye.
+  document.body.className = `${timer.type}${paused && !timer.waiting ? ' paused' : ''}`;
+  $('phase').textContent = timer.waiting ? 'Break’s over' : paused ? 'Paused' : timer.label;
+  $('block').textContent = timer.waiting ? '· Press ▶'
+    : timer.blockText ? `· ${timer.blockText}` : '';
   $('time').textContent = fmtClock(remaining);
   $('fill').style.width = `${Math.min(100, (1 - remaining / timer.totalMs) * 100)}%`;
   $('pauseBtn').textContent = paused ? '▶' : '⏸';
-  $('pauseBtn').title = paused ? 'Resume' : 'Pause';
-  document.title = `${fmtClock(remaining)} · ${timer.label}`;
+  $('pauseBtn').title = timer.waiting ? 'I’m back' : paused ? 'Resume' : 'Pause';
+  document.title = timer.waiting ? 'Break’s over' : `${fmtClock(remaining)} · ${timer.label}`;
 }
 
 window.desktop.onTimer((snapshot) => {

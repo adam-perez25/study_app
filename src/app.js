@@ -14,6 +14,7 @@ const state = load() || {
 state.history ??= {};        // { 'YYYY-MM-DD': { subjectId | 'none': focused milliseconds } }
 state.sessionCount ??= 0;
 state.settings.dailyGoal ??= 60; // minutes
+state.settings.autoStartFocus ??= false; // off: after a break, the next focus block waits for "I'm back"
 state.subjects ??= [];       // { id, name, color (0–7, see --subj-N in styles.css), hidden }
 state.settings.subjectId ??= null; // last subject picked on the start screen
 // Days saved before subjects existed were plain totals; keep them as "no subject".
@@ -143,6 +144,11 @@ function initSetup() {
       $('minutes').value = min % 60;
       updatePreview();
     });
+  });
+  $('autoStartFocus').checked = state.settings.autoStartFocus;
+  $('autoStartFocus').addEventListener('change', () => {
+    state.settings.autoStartFocus = $('autoStartFocus').checked;
+    save();
   });
   $('startBtn').addEventListener('click', startSession);
   $('newBtn').addEventListener('click', () => {
@@ -386,8 +392,15 @@ function tick() {
     if (s.index >= s.blocks.length - 1) return finishSession();
     creditFocus(s.blocks[s.index].min * 60000);
     s.index++;
-    s.endsAt += s.blocks[s.index].min * 60000;
     advanced = true;
+    const next = s.blocks[s.index];
+    if (next.type === 'focus' && !state.settings.autoStartFocus) {
+      // Break's over: hold the focus block until "I'm back", so it doesn't run while you're away.
+      s.waiting = true;
+      s.pausedRemaining = next.min * 60000;
+      break;
+    }
+    s.endsAt += next.min * 60000;
   }
   if (advanced) {
     save();
@@ -405,15 +418,16 @@ function tick() {
   const fraction = 1 - remaining / totalMs;
 
   setAccent(block.type);
-  $('phaseLabel').textContent = s.pausedRemaining != null ? `${LABELS[block.type]} · paused` : LABELS[block.type];
+  $('phaseLabel').textContent = s.waiting ? 'Break’s over'
+    : s.pausedRemaining != null ? `${LABELS[block.type]} · paused` : LABELS[block.type];
   $('timeLeft').textContent = fmtClock(remaining);
   $('ringProgress').style.strokeDasharray = RING_LEN;
   $('ringProgress').style.strokeDashoffset = RING_LEN * fraction;
 
   const focusIdx = s.blocks.slice(0, s.index + 1).filter((b) => b.type === 'focus').length;
   const focusTotal = s.blocks.filter((b) => b.type === 'focus').length;
-  $('blockCount').textContent = block.type === 'focus'
-    ? `Block ${focusIdx} of ${focusTotal}`
+  $('blockCount').textContent = s.waiting ? `Block ${focusIdx} of ${focusTotal} starts when you’re back`
+    : block.type === 'focus' ? `Block ${focusIdx} of ${focusTotal}`
     : `Next: block ${focusIdx + 1} of ${focusTotal}`;
 
   const pill = $('subjectPill');
@@ -428,9 +442,9 @@ function tick() {
   $('totalLeft').textContent = `${fmtClock(remaining + laterMs)} left in the session`;
 
   renderPlanBar($('planLive'), s.blocks, s.index, fraction);
-  $('pauseBtn').textContent = s.pausedRemaining != null ? 'Resume' : 'Pause';
-  document.body.classList.toggle('paused', s.pausedRemaining != null);
-  document.title = `${fmtClock(remaining)} · ${LABELS[block.type]}`;
+  $('pauseBtn').textContent = s.waiting ? 'I’m back' : s.pausedRemaining != null ? 'Resume' : 'Pause';
+  document.body.classList.toggle('paused', s.pausedRemaining != null && !s.waiting);
+  document.title = s.waiting ? 'Break’s over · Study Timer' : `${fmtClock(remaining)} · ${LABELS[block.type]}`;
 
   publishTimer({
     type: block.type,
@@ -441,6 +455,7 @@ function tick() {
       : $('blockCount').textContent,
     endsAt: s.endsAt,
     pausedRemaining: s.pausedRemaining,
+    waiting: !!s.waiting,
     totalMs,
   });
 }
@@ -455,11 +470,13 @@ function publishTimer(snapshot) {
   window.desktop.updateTimer(snapshot);
 }
 
+// Also "I'm back" when a focus block is waiting after a break.
 function togglePause() {
   const s = state.session;
   if (s.pausedRemaining != null) {
     s.endsAt = Date.now() + s.pausedRemaining;
     s.pausedRemaining = null;
+    s.waiting = false;
   } else {
     s.pausedRemaining = s.endsAt - Date.now();
   }
@@ -473,8 +490,10 @@ function skipBlock() {
   creditFocus(elapsedInBlock());
   s.index++;
   const ms = s.blocks[s.index].min * 60000;
-  if (s.pausedRemaining != null) s.pausedRemaining = ms;
-  else s.endsAt = Date.now() + ms;
+  // Skipping a focus block that was waiting means you're here: start the next block right away.
+  if (s.pausedRemaining != null && !s.waiting) s.pausedRemaining = ms;
+  else { s.pausedRemaining = null; s.endsAt = Date.now() + ms; }
+  s.waiting = false;
   save();
   announce(s.blocks[s.index]);
   tick();
@@ -614,7 +633,8 @@ function notify(title, body) {
 
 function announce(block) {
   chime(block.type === 'focus' ? 'focus' : 'break');
-  if (block.type === 'focus') notify('Back to focus', `${block.min} minutes of study. You've got this.`);
+  if (block.type === 'focus' && state.session?.waiting) notify('Break’s over', 'Click “I’m back” when you’re ready to focus.');
+  else if (block.type === 'focus') notify('Back to focus', `${block.min} minutes of study. You've got this.`);
   else notify(`${LABELS[block.type]} time`, `Take ${block.min} minutes to rest.`);
 }
 

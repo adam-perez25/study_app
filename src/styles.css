@@ -113,6 +113,8 @@ button.big { width: 100%; padding: 12px; font-size: 1.05rem; font-weight: 600; }
 
 .advanced { margin-top: 12px; }
 .advanced summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
+label.check { flex-direction: row; align-items: center; gap: 8px; margin-top: 12px; color: var(--text); font-size: .9rem; cursor: pointer; }
+label.check input { width: 18px; height: 18px; accent-color: var(--accent); }
 
 /* Block timeline */
 .plan {
@@ -280,6 +282,7 @@ body.paused .time { opacity: .5; }
   margin-top: 8px; padding: 3px 12px; border-radius: 999px;
   border: 1px solid var(--border); background: var(--card); font-size: .9rem;
 }
+.subject-pill[hidden] { display: none; }
 
 .by-subject-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .by-subject-head h2 { margin: 0; }
