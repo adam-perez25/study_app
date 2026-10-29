@@ -1,0 +1,14 @@
+{
+  "name": "study-timer",
+  "productName": "Study Timer",
+  "version": "0.1.0",
+  "description": "A pomodoro-style study timer with a session task list",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^45.1.0"
+  }
+}

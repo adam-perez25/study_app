@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Study Timer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app">
+    <!-- Setup screen -->
+    <section id="setup" class="screen">
+      <header class="top">
+        <h1>Study session</h1>
+        <button id="statsBtn">📊 Stats</button>
+      </header>
+
+      <div class="card today-card" id="todayCard">
+        <div class="streak">
+          <span class="flame">🔥</span>
+          <strong id="streakNum">0</strong>
+          <small>day streak</small>
+        </div>
+        <div class="today-goal">
+          <div class="goal-text"><span>Today</span><span id="todayText">0 min / 1 h</span></div>
+          <div class="meter"><div class="meter-fill" id="todayMeter"></div></div>
+          <p class="summary" id="streakHint"></p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>How long do you want to study?</h2>
+        <div class="presets" id="presets">
+          <button data-min="30">30 min</button>
+          <button data-min="60">1 h</button>
+          <button data-min="90">1 h 30</button>
+          <button data-min="120">2 h</button>
+          <button data-min="180">3 h</button>
+        </div>
+        <div class="row">
+          <label>Hours <input id="hours" type="number" min="0" max="12" value="1"></label>
+          <label>Minutes <input id="minutes" type="number" min="0" max="59" step="5" value="0"></label>
+        </div>
+
+        <details class="advanced">
+          <summary>Block settings</summary>
+          <div class="row">
+            <label>Focus block (min) <input id="focusLen" type="number" min="5" max="120" value="25"></label>
+            <label>Short break (min) <input id="shortLen" type="number" min="1" max="30" value="5"></label>
+          </div>
+          <div class="row">
+            <label>Long break (min) <input id="longLen" type="number" min="1" max="60" value="15"></label>
+            <label>Long break every <input id="longEvery" type="number" min="2" max="10" value="4"> blocks</label>
+          </div>
+        </details>
+
+        <div class="plan" id="planPreview"></div>
+        <p class="summary" id="planSummary"></p>
+      </div>
+
+      <div class="card">
+        <h2>What do you want to get done?</h2>
+        <form id="taskForm" class="task-form">
+          <input id="taskInput" type="text" placeholder="e.g. Read chapter 3" autocomplete="off">
+          <button type="submit">Add</button>
+        </form>
+        <ul id="taskListSetup" class="tasks"></ul>
+      </div>
+
+      <button id="startBtn" class="primary big">Start session</button>
+    </section>
+
+    <!-- Running session screen -->
+    <section id="session" class="screen hidden">
+      <div class="timer-wrap">
+        <div class="phase" id="phaseLabel">Focus</div>
+        <div class="ring">
+          <svg viewBox="0 0 200 200" aria-hidden="true">
+            <circle class="track" cx="100" cy="100" r="90"></circle>
+            <circle class="progress" id="ringProgress" cx="100" cy="100" r="90"></circle>
+          </svg>
+          <div class="time" id="timeLeft">25:00</div>
+        </div>
+        <div class="block-count" id="blockCount">Block 1 of 4</div>
+        <div class="controls">
+          <button id="pauseBtn" class="primary">Pause</button>
+          <button id="skipBtn">Skip</button>
+          <button id="miniBtn" title="Show a small timer that stays on top of other windows">⧉ Mini timer</button>
+          <button id="endBtn" class="danger">End session</button>
+        </div>
+        <p class="summary" id="miniHint">Minimize the app and the mini timer pops up automatically.</p>
+        <div class="plan" id="planLive"></div>
+        <p class="summary" id="totalLeft"></p>
+      </div>
+
+      <div class="card">
+        <h2>Session tasks</h2>
+        <form id="taskFormLive" class="task-form">
+          <input id="taskInputLive" type="text" placeholder="Add another task" autocomplete="off">
+          <button type="submit">Add</button>
+        </form>
+        <ul id="taskListLive" class="tasks"></ul>
+      </div>
+    </section>
+
+    <!-- Done screen -->
+    <section id="done" class="screen hidden">
+      <h1>Session complete 🎉</h1>
+      <div class="card">
+        <p class="summary" id="doneSummary"></p>
+        <p class="done-streak" id="doneStreak"></p>
+        <ul id="taskListDone" class="tasks readonly"></ul>
+      </div>
+      <div class="row-buttons">
+        <button id="doneStatsBtn" class="big">📊 See my progress</button>
+        <button id="newBtn" class="primary big">New session</button>
+      </div>
+    </section>
+
+    <!-- Stats screen -->
+    <section id="stats" class="screen hidden">
+      <header class="top">
+        <h1>Your progress</h1>
+        <button id="statsBack">← Back</button>
+      </header>
+
+      <div class="tiles">
+        <div class="tile"><div class="tile-label">Today</div><div class="tile-value" id="statToday"></div><div class="tile-sub" id="statTodaySub"></div></div>
+        <div class="tile"><div class="tile-label">This week</div><div class="tile-value" id="statWeek"></div><div class="tile-sub" id="statWeekSub"></div></div>
+        <div class="tile"><div class="tile-label">This month</div><div class="tile-value" id="statMonth"></div><div class="tile-sub" id="statMonthSub"></div></div>
+        <div class="tile"><div class="tile-label">All time</div><div class="tile-value" id="statTotal"></div><div class="tile-sub" id="statTotalSub"></div></div>
+      </div>
+
+      <div class="stats-grid">
+      <div class="card streak-card" id="streakCard">
+        <div class="streak big-streak">
+          <span class="flame">🔥</span>
+          <strong id="streakCur">0</strong>
+          <small>day streak</small>
+        </div>
+        <div>
+          <div class="tile-sub" id="streakBest"></div>
+          <p class="motivation" id="motivation"></p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="goal-text"><strong id="levelName"></strong></div>
+        <div class="meter level"><div class="meter-fill" id="levelMeter"></div></div>
+        <p class="summary" id="levelNext"></p>
+      </div>
+
+      <div class="card">
+        <h2>Study time, last 14 days</h2>
+        <div class="bars" id="bars"></div>
+      </div>
+
+      <div class="card">
+        <h2>Last 20 weeks</h2>
+        <div class="heatmap-wrap">
+          <div class="heat-days"><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span><span>Sun</span></div>
+          <div class="heatmap" id="heatmap"></div>
+        </div>
+        <div class="heat-legend">
+          <span>Less</span>
+          <i class="heat-cell l0"></i><i class="heat-cell l1"></i><i class="heat-cell l2"></i><i class="heat-cell l3"></i><i class="heat-cell l4"></i>
+          <span>Goal reached</span>
+        </div>
+      </div>
+
+      <div class="card wide">
+        <div class="row">
+          <label>Daily goal (minutes) <input id="goalInput" type="number" min="5" max="720" step="5"></label>
+          <div class="record"><div class="tile-label">Best day</div><div id="recordDay"></div></div>
+        </div>
+        <p class="summary">A day counts toward your streak once you've focused for at least 10 minutes.</p>
+        <div class="reset-row">
+          <button id="resetStatsBtn" class="danger">Reset stats</button>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <div id="tooltip" class="tooltip" hidden></div>
+
+    <!-- Confirmation popup (drawn by the app, so no Windows alert sound) -->
+    <dialog id="confirmDialog" class="confirm">
+      <h2 id="confirmTitle"></h2>
+      <p id="confirmText"></p>
+      <div class="confirm-buttons">
+        <button id="confirmNo" class="primary" autofocus></button>
+        <button id="confirmYes" class="danger"></button>
+      </div>
+    </dialog>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

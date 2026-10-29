@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Study Timer</title>
+  <style>
+    :root { --bg: #d4503f; }
+    body.short { --bg: #23875f; }
+    body.long { --bg: #2f6fc4; }
+    body.paused { --bg: #5b6270; }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
+    body {
+      background: var(--bg);
+      color: #fff;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      user-select: none;
+      -webkit-app-region: drag; /* drag the window from anywhere */
+      transition: background .4s;
+      display: flex;
+      flex-direction: column;
+      padding: 10px 12px 0;
+    }
+    button { -webkit-app-region: no-drag; }
+
+    .top { display: flex; align-items: center; gap: 6px; }
+    .phase { font-weight: 700; font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; }
+    .block { font-size: .78rem; opacity: .85; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .main { display: flex; align-items: center; justify-content: space-between; flex: 1; }
+    .time { font-size: 2.3rem; font-weight: 300; font-variant-numeric: tabular-nums; line-height: 1; }
+
+    .icon {
+      border: none; background: rgba(255, 255, 255, .16); color: #fff;
+      width: 34px; height: 34px; border-radius: 8px;
+      font-size: 1rem; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .icon:hover { background: rgba(255, 255, 255, .3); }
+    .icon.small { width: 24px; height: 24px; font-size: .8rem; background: none; }
+    .icon.small:hover { background: rgba(255, 255, 255, .2); }
+    .actions { display: flex; gap: 6px; }
+
+    .bar { height: 5px; margin: 0 -12px; background: rgba(0, 0, 0, .18); }
+    .fill { height: 100%; width: 0; background: rgba(255, 255, 255, .85); }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <span class="phase" id="phase">Focus</span>
+    <span class="block" id="block"></span>
+    <button class="icon small" id="openBtn" title="Open the app">⤢</button>
+    <button class="icon small" id="closeBtn" title="Hide mini timer">✕</button>
+  </div>
+  <div class="main">
+    <div class="time" id="time">--:--</div>
+    <div class="actions">
+      <button class="icon" id="pauseBtn" title="Pause">⏸</button>
+      <button class="icon" id="skipBtn" title="Skip to next block">⏭</button>
+    </div>
+  </div>
+  <div class="bar"><div class="fill" id="fill"></div></div>
+  <script src="mini.js"></script>
+</body>
+</html>
