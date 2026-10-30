@@ -38,8 +38,10 @@ function createWindow() {
   // Icon and name Windows uses for this window's taskbar button (and when pinning it)
   mainWin.setAppDetails({
     appId: 'study-timer',
-    appIconPath: path.join(__dirname, 'assets', 'icon.ico'),
-    relaunchCommand: `"${process.execPath}" "${__dirname}"`,
+    // Installed app: its own exe (which has the icon built in; Windows can't read files
+    // inside app.asar). Dev (`npm start`): electron.exe plus the project folder.
+    appIconPath: app.isPackaged ? process.execPath : path.join(__dirname, 'assets', 'icon.ico'),
+    relaunchCommand: app.isPackaged ? `"${process.execPath}"` : `"${process.execPath}" "${__dirname}"`,
     relaunchDisplayName: 'Study Timer',
   });
 
