@@ -5,7 +5,7 @@ const path = require('path');
 
 // Default window size, never larger than the screen's free space (minus the title bar).
 const WIDTH = 1000;
-const HEIGHT = 764;
+const HEIGHT = 850;
 const MINI_WIDTH = 280;
 const MINI_HEIGHT = 112;
 
