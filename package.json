@@ -3,14 +3,47 @@
   "productName": "Study Timer",
   "version": "0.1.0",
   "description": "A pomodoro-style study timer with a session task list",
+  "author": "Adam Perez",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dist": "electron-builder --win nsis"
   },
   "license": "MIT",
+  "build": {
+    "appId": "study-timer",
+    "productName": "Study Timer",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Study Timer",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Study-Timer-Setup-${version}.${ext}"
+    }
+  },
   "devDependencies": {
     "electron": "^45.1.0",
+    "electron-builder": "^26.18.0",
     "jsdom": "^30.1.3",
     "vitest": "^5.0.5"
   }
