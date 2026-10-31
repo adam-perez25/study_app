@@ -581,9 +581,15 @@ function initSession() {
       if (cmd === 'skip') skipBlock();
       if (cmd === 'confirm-close') confirmClose();
     });
+    // Full screen and Do not disturb: also desktop only. The app leaves full screen when the session ends.
+    $('fullscreenBtn').addEventListener('click', () => window.desktop.toggleFullScreen());
+    window.desktop.onFullScreen((on) => {
+      document.body.classList.toggle('fullscreen', on);
+      $('fullscreenBtn').textContent = on ? '✕ Exit full screen' : '⛶ Full screen';
+    });
+    $('dndBtn').addEventListener('click', () => window.desktop.openDndSettings());
   } else {
-    $('miniBtn').hidden = true;
-    $('miniHint').hidden = true;
+    for (const id of ['miniBtn', 'miniHint', 'fullscreenBtn', 'dndBtn', 'dndHint']) $(id).hidden = true;
   }
   $('endBtn').addEventListener('click', async () => {
     const end = await askConfirm({
@@ -598,6 +604,10 @@ function initSession() {
     if (e.code === 'Space' && state.session && e.target.tagName !== 'INPUT') {
       e.preventDefault();
       togglePause();
+    }
+    // Esc leaves full screen, unless it is closing one of the app's popups.
+    if (e.key === 'Escape' && document.body.classList.contains('fullscreen') && !$('confirmDialog').open) {
+      window.desktop.exitFullScreen();
     }
   });
 }
