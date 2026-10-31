@@ -1,7 +1,7 @@
 {
   "name": "study-timer",
   "productName": "Study Timer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A pomodoro-style study timer with a session task list",
   "author": "Adam Perez",
   "main": "main.js",
