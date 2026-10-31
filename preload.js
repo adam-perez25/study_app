@@ -8,6 +8,10 @@ contextBridge.exposeInMainWorld('desktop', {
   toggleMini: () => ipcRenderer.send('mini:toggle'),
   onCommand: (cb) => ipcRenderer.on('command', (_e, cmd) => cb(cmd)),
   answerClose: (endAndClose) => ipcRenderer.send('close:answer', endAndClose),
+  toggleFullScreen: () => ipcRenderer.send('fullscreen:toggle'),
+  exitFullScreen: () => ipcRenderer.send('fullscreen:exit'),
+  onFullScreen: (cb) => ipcRenderer.on('fullscreen', (_e, on) => cb(on)),
+  openDndSettings: () => ipcRenderer.send('dnd:open'),
   // Mini timer
   onTimer: (cb) => ipcRenderer.on('timer', (_e, snapshot) => cb(snapshot)),
   sendCommand: (cmd) => ipcRenderer.send('mini:command', cmd),

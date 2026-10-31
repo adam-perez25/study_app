@@ -203,6 +203,10 @@ label.check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .block-count { color: var(--muted); }
 .controls { display: flex; gap: 8px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
 .controls button { min-width: 96px; }
+/* Full screen: the timer sits in the middle of the screen, with nothing else around it. */
+body.fullscreen .app { min-height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; }
+body.fullscreen .screen { width: 100%; }
+body.fullscreen #miniHint, body.fullscreen #dndHint { display: none; }
 
 body.paused .time { opacity: .5; }
 

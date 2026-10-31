@@ -67,6 +67,9 @@ function createWindow() {
     allowClose = true;
     mainWin.close();
   });
+  // Lets the session screen switch its button between "Full screen" and "Exit full screen".
+  mainWin.on('enter-full-screen', () => mainWin.webContents.send('fullscreen', true));
+  mainWin.on('leave-full-screen', () => mainWin.webContents.send('fullscreen', false));
   mainWin.on('closed', () => {
     mainWin = null;
     closeMini();
@@ -148,11 +151,21 @@ function showMain() {
 // The app sends a snapshot whenever the timer changes (new block, pause, skip, end).
 ipcMain.on('timer:update', (_e, snapshot) => {
   timer = snapshot;
-  if (!timer) return closeMini();
+  if (!timer) {
+    if (mainWin?.isFullScreen()) mainWin.setFullScreen(false); // full screen is only for sessions
+    return closeMini();
+  }
   miniWin?.webContents.send('timer', timer);
 });
 
 ipcMain.on('mini:toggle', () => (miniWin ? closeMini() : openMini(false)));
+
+ipcMain.on('fullscreen:toggle', () => mainWin?.setFullScreen(!mainWin.isFullScreen()));
+ipcMain.on('fullscreen:exit', () => mainWin?.setFullScreen(false));
+
+// Windows has no supported way for apps to switch Do not disturb on, so open the
+// Notifications page of Windows Settings, where its switch is at the top.
+ipcMain.on('dnd:open', () => shell.openExternal('ms-settings:notifications'));
 
 // Buttons on the mini timer.
 ipcMain.on('mini:command', (_e, cmd) => {

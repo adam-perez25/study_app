@@ -14,7 +14,8 @@ const STORAGE_KEY = 'study-timer-v1';
 const DEFAULT_NOW = new Date(2026, 9, 28, 12, 0, 0).getTime();
 
 // saved: data to put in storage before the app starts; rawSaved: the same, as a raw string.
-function loadApp({ saved = null, rawSaved = null, now = DEFAULT_NOW } = {}) {
+// desktop: a stand-in for the Electron bridge (window.desktop); without it the app runs as in a plain browser.
+function loadApp({ saved = null, rawSaved = null, now = DEFAULT_NOW, desktop = null } = {}) {
   const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only' });
   const { window } = dom;
 
@@ -39,6 +40,7 @@ function loadApp({ saved = null, rawSaved = null, now = DEFAULT_NOW } = {}) {
     if (this.onclose) this.onclose();
   };
 
+  if (desktop) window.desktop = desktop;
   if (saved) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
   if (rawSaved != null) window.localStorage.setItem(STORAGE_KEY, rawSaved);
   // Run as a real script (not eval), so top-level consts like `state` stay reachable afterwards.

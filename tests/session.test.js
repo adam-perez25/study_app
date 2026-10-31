@@ -225,3 +225,62 @@ describe('reopening the app with a saved session', () => {
     expect(app.state.session.index).toBe(0);
   });
 });
+
+describe('full screen and Do not disturb', () => {
+  // Records what the app asks the desktop app to do, and lets the test send the full-screen state back.
+  function fakeDesktop() {
+    const calls = [];
+    let fullScreenCb = null;
+    const record = (name) => () => calls.push(name);
+    return {
+      calls,
+      setFullScreen: (on) => fullScreenCb(on),
+      updateTimer: () => {}, toggleMini: record('toggleMini'), onCommand: () => {}, answerClose: () => {},
+      toggleFullScreen: record('toggleFullScreen'), exitFullScreen: record('exitFullScreen'),
+      onFullScreen: (cb) => { fullScreenCb = cb; }, openDndSettings: record('openDndSettings'),
+    };
+  }
+  const press = (key) => app.window.document.dispatchEvent(new app.window.KeyboardEvent('keydown', { key }));
+
+  it('hides the buttons in a plain browser', () => {
+    app = loadApp();
+    for (const id of ['fullscreenBtn', 'dndBtn', 'dndHint']) expect(app.$(id).hidden).toBe(true);
+  });
+
+  it('the buttons ask the desktop app for full screen and the Windows notification settings', () => {
+    const desktop = fakeDesktop();
+    app = loadApp({ desktop });
+    app.run('startSession()');
+    expect(app.$('fullscreenBtn').hidden).toBe(false);
+    app.$('fullscreenBtn').click();
+    app.$('dndBtn').click();
+    expect(desktop.calls).toEqual(['toggleFullScreen', 'openDndSettings']);
+  });
+
+  it('the button label follows the full-screen state, and Esc exits', () => {
+    const desktop = fakeDesktop();
+    app = loadApp({ desktop });
+    app.run('startSession()');
+    press('Escape');
+    expect(desktop.calls).toEqual([]); // not in full screen: nothing to exit
+    desktop.setFullScreen(true);
+    expect(app.$('fullscreenBtn').textContent).toContain('Exit full screen');
+    expect(app.window.document.body.classList.contains('fullscreen')).toBe(true);
+    press('Escape');
+    expect(desktop.calls).toEqual(['exitFullScreen']);
+    desktop.setFullScreen(false);
+    expect(app.$('fullscreenBtn').textContent).toContain('Full screen');
+    expect(app.window.document.body.classList.contains('fullscreen')).toBe(false);
+  });
+
+  it('Esc closes an open popup instead of leaving full screen', () => {
+    const desktop = fakeDesktop();
+    app = loadApp({ desktop });
+    app.run('startSession()');
+    desktop.setFullScreen(true);
+    app.$('endBtn').click();
+    expect(app.$('confirmDialog').open).toBe(true);
+    press('Escape');
+    expect(desktop.calls).toEqual([]);
+  });
+});
