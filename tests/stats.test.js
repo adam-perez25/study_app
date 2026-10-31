@@ -118,7 +118,7 @@ describe('levels', () => {
 
   it('starts at level 1 with 2 hours to the next level', () => {
     app = loadApp();
-    expect(level(0)).toEqual({ level: 1, title: 'Beginner', fraction: 0, toNext: 120 });
+    expect(level(0)).toEqual({ level: 1, title: 'Beginner', tier: 'Bronze', fraction: 0, toNext: 120 });
   });
 
   it('reaches level 2 at 2 h, level 3 at 6 h, level 4 at 12 h', () => {
@@ -130,9 +130,33 @@ describe('levels', () => {
     expect(level(540).fraction).toBeCloseTo(0.5);
   });
 
+  it('has new titles after Legend: Grandmaster at 90 h, Transcendent at 380 h', () => {
+    app = loadApp();
+    expect(level(72 * 60)).toMatchObject({ level: 9, title: 'Legend' });
+    expect(level(90 * 60)).toMatchObject({ level: 10, title: 'Grandmaster' });
+    expect(level(380 * 60)).toMatchObject({ level: 20, title: 'Transcendent' });
+  });
+
+  it('changes tier every 4 levels and stays Diamond after that', () => {
+    app = loadApp();
+    expect(level(12 * 60 - 1).tier).toBe('Bronze'); // level 4
+    expect(level(20 * 60).tier).toBe('Silver');     // level 5
+    expect(level(72 * 60).tier).toBe('Gold');       // level 9
+    expect(level(156 * 60).tier).toBe('Platinum');  // level 13
+    expect(level(272 * 60).tier).toBe('Diamond');   // level 17
+    expect(level(1000 * 60).tier).toBe('Diamond');
+  });
+
   it('keeps the last title for very high levels', () => {
     app = loadApp();
-    expect(level(1000 * 60).title).toBe('Legend');
+    expect(level(1000 * 60)).toMatchObject({ level: 32, title: 'Transcendent' });
+  });
+
+  it('shows the tier on the stats screen', () => {
+    app = loadApp({ saved: withHistory({ [day(0)]: { none: 25 * 60 * MIN } }) });
+    app.run('renderStats()');
+    expect(app.$('levelTier').textContent).toBe('Silver');
+    expect(app.$('levelCard').dataset.tier).toBe('silver');
   });
 });
 
@@ -232,5 +256,92 @@ describe('achievements', () => {
     app.advance(60 * MIN);
     expect(app.$('doneAchievements').hidden).toBe(false);
     expect(app.$('doneAchievements').textContent).toContain('First session');
+  });
+
+  it('has 36 badges with unique ids', () => {
+    app = loadApp();
+    const ids = app.run('ACHIEVEMENTS.map((a) => a.id)');
+    expect(ids).toHaveLength(36);
+    expect(new Set(ids).size).toBe(36);
+  });
+
+  it('"Perfect week" needs the daily goal 7 days in a row', () => {
+    const history = {};
+    for (let i = 0; i < 6; i++) history[day(-i)] = { none: 60 * MIN };
+    history[day(-6)] = { none: 59 * MIN };
+    history[day(-7)] = { none: 60 * MIN };
+    app = loadApp({ saved: withHistory(history) });
+    expect(app.run('achievementMetrics()').goalRun).toBe(6);
+    expect(app.state.achievements.perfectWeek).toBeUndefined();
+    app.run(`state.history['${day(-6)}'] = { none: 60 * 60000 }`);
+    expect(app.run('checkAchievements()').map((a) => a.id)).toContain('perfectWeek');
+  });
+
+  it('"Big day", "Explorer" and "Specialist" use the saved history', () => {
+    app = loadApp({ saved: withHistory({
+      [day(-2)]: { math: 4 * 60 * MIN },
+      [day(-1)]: { math: 21 * 60 * MIN, bio: 10 * MIN },
+      [day(0)]: { chem: 10 * MIN, none: 60 * MIN },
+    }) });
+    const m = app.run('achievementMetrics()');
+    expect(m.bestDay).toBeCloseTo(21 + 1 / 6);
+    expect(m.subjects).toBe(3); // "No subject" doesn't count
+    expect(m.bestSubject).toBe(25);
+    expect(app.state.achievements).toMatchObject({
+      bigDay: expect.any(String), subjects3: expect.any(String), specialist: expect.any(String),
+    });
+    expect(app.state.achievements.subjects5).toBeUndefined();
+  });
+
+  it('"Weekend warrior" needs both Saturday and Sunday of the same weekend', () => {
+    // DEFAULT_NOW is Wednesday 28 Oct: day(-4) is Saturday 24, day(-3) Sunday 25, day(-10) Sunday 18.
+    app = loadApp({ saved: withHistory({ [day(-4)]: { none: 10 * MIN }, [day(-10)]: { none: 10 * MIN } }) });
+    expect(app.run('achievementMetrics()').weekends).toBe(0);
+    app.run(`state.history['${day(-3)}'] = { none: 10 * 60000 }`);
+    expect(app.run('achievementMetrics()').weekends).toBe(1);
+  });
+
+  it('"Comeback" needs 7 or more days off between two study days', () => {
+    app = loadApp({ saved: withHistory({ [day(-7)]: { none: 30 * MIN }, [day(0)]: { none: 30 * MIN } }) });
+    expect(app.run('achievementMetrics()').comebacks).toBe(0); // 6 days off
+    app.run(`state.history['${day(-8)}'] = state.history['${day(-7)}']; delete state.history['${day(-7)}']`);
+    expect(app.run('achievementMetrics()').comebacks).toBe(1); // 7 days off
+  });
+
+  it('records the start time and length of finished sessions', () => {
+    // 7:00 start: early bird. A 2 h session at 25-min focus blocks ends with 100 min of focus.
+    app = loadApp({ now: new Date(2026, 9, 28, 7, 0).getTime(),
+      saved: withHistory({}, { settings: { ...BASE_SETTINGS, hours: 2 } }) });
+    app.run('startSession()');
+    app.advance(120 * MIN);
+    expect(app.state.session).toBeNull();
+    expect(app.state.records).toMatchObject({ earlyStarts: 1, lateStarts: 0 });
+    expect(app.run('achievementMetrics()').longestSession).toBeGreaterThanOrEqual(90);
+    expect(app.state.achievements.earlyBird).toBeTruthy();
+    expect(app.state.achievements.deepFocus).toBeTruthy();
+    expect(app.state.achievements.nightOwl).toBeUndefined();
+  });
+
+  it('a session started after 22:00 unlocks "Night owl"', () => {
+    app = loadApp({ now: new Date(2026, 9, 28, 23, 0).getTime() });
+    app.run('startSession()');
+    app.advance(60 * MIN);
+    expect(app.state.records.lateStarts).toBe(1);
+    expect(app.state.achievements.nightOwl).toBeTruthy();
+  });
+
+  it('counts each finished task once', () => {
+    app = loadApp({ saved: withHistory({}, { tasks: [
+      { id: 1, text: 'a', done: true }, { id: 2, text: 'b', done: true }, { id: 3, text: 'c', done: false },
+    ] }) });
+    app.run('startSession(); finishSession(true)');
+    expect(app.state.records.tasksDone).toBe(2);
+    app.run('startSession(); finishSession(true)'); // same tasks still ticked: not counted again
+    expect(app.state.records.tasksDone).toBe(2);
+  });
+
+  it('upgrades older saved data with empty records and keeps existing ones', () => {
+    app = loadApp({ saved: withHistory({}, { records: { tasksDone: 7 } }) });
+    expect(plain(app.state.records)).toEqual({ tasksDone: 7, earlyStarts: 0, lateStarts: 0, longestSessionMs: 0 });
   });
 });
