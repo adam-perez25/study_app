@@ -20,6 +20,8 @@ state.subjects ??= [];       // { id, name, color (0–7, see --subj-N in styles
 state.settings.subjectId ??= null; // last subject picked on the start screen
 state.sessionLog ??= [];     // 'YYYY-MM-DD' of each completed session (older sessions weren't logged)
 state.achievements ??= {};   // { achievementId: ISO date it was unlocked }
+// Session details the history doesn't keep, for achievements. Only counted from this version on.
+state.records = { tasksDone: 0, earlyStarts: 0, lateStarts: 0, longestSessionMs: 0, ...state.records };
 state.settings.sound ??= {};       // chime: a key of CHIMES; volume: 0–1
 state.settings.sound.chime ??= 'bells';
 state.settings.sound.volume ??= 0.7;
@@ -510,6 +512,15 @@ function skipBlock() {
   tick();
 }
 
+// Start time and length of a completed session, for "Early bird", "Night owl" and "Deep focus".
+function recordSession(s) {
+  const r = state.records;
+  const h = new Date(s.startedAt).getHours();
+  if (h >= 4 && h < 8) r.earlyStarts++;
+  if (h >= 22 || h < 4) r.lateStarts++;
+  r.longestSessionMs = Math.max(r.longestSessionMs, s.focusedMs);
+}
+
 function finishSession(early = false) {
   clearInterval(tickHandle);
   const s = state.session;
@@ -522,6 +533,11 @@ function finishSession(early = false) {
   if (s.focusedMs > 0) {
     state.sessionCount++;
     state.sessionLog.push(dayKey(new Date()));
+    recordSession(s);
+  }
+  // Each finished task counts once, even if it is unticked and ticked again before "New session".
+  for (const t of state.tasks) {
+    if (t.done && !t.counted) { t.counted = true; state.records.tasksDone++; }
   }
   state.session = null;
   save();
@@ -765,7 +781,12 @@ function announce(block) {
 // ---------- Progress & stats ----------
 
 const STREAK_MIN = 10; // minutes of focus needed for a day to count toward the streak
-const LEVEL_TITLES = ['Beginner', 'Apprentice', 'Learner', 'Student', 'Scholar', 'Expert', 'Master', 'Sage', 'Legend'];
+const LEVEL_TITLES = [
+  'Beginner', 'Apprentice', 'Learner', 'Student', 'Scholar', 'Expert', 'Master', 'Sage', 'Legend', 'Grandmaster',
+  'Virtuoso', 'Luminary', 'Oracle', 'Titan', 'Mythic', 'Ascendant', 'Immortal', 'Celestial', 'Eternal', 'Transcendent',
+];
+// Every 4 levels the level badge changes colour (see --tier-* in styles.css); Diamond is the last one.
+const LEVEL_TIERS = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond'];
 const pad = (n) => String(n).padStart(2, '0');
 
 function dayKey(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
@@ -798,14 +819,19 @@ function streaks() {
   let cur = 0;
   while (minutesOn(d) >= STREAK_MIN) { cur++; d = addDays(d, -1); }
 
+  return { cur, best: Math.max(longestRun(STREAK_MIN * 60000), cur), studiedToday: minutesOn(today) >= STREAK_MIN };
+}
+
+// Most days in a row with at least minMs of focus each.
+function longestRun(minMs) {
   let best = 0, run = 0, prev = null;
   for (const k of Object.keys(state.history).sort()) {
-    if (dayMs(k) < STREAK_MIN * 60000) continue;
+    if (dayMs(k) < minMs) continue;
     run = prev && dayKey(addDays(prev, 1)) === k ? run + 1 : 1;
     best = Math.max(best, run);
     prev = parseKey(k);
   }
-  return { cur, best: Math.max(best, cur), studiedToday: minutesOn(today) >= STREAK_MIN };
+  return best;
 }
 
 // Level L is reached after L·(L−1) hours: 2 h, 6 h, 12 h, 20 h, 30 h…
@@ -817,6 +843,7 @@ function levelInfo(totalMin) {
   return {
     level,
     title: LEVEL_TITLES[Math.min(level - 1, LEVEL_TITLES.length - 1)],
+    tier: LEVEL_TIERS[Math.min(Math.floor((level - 1) / 4), LEVEL_TIERS.length - 1)],
     fraction: (totalMin - from) / (to - from),
     toNext: to - totalMin,
   };
@@ -881,6 +908,8 @@ function renderStats() {
 
   const lvl = levelInfo(total);
   $('levelName').textContent = `Level ${lvl.level} · ${lvl.title}`;
+  $('levelTier').textContent = lvl.tier;
+  $('levelCard').dataset.tier = lvl.tier.toLowerCase();
   $('levelMeter').style.width = `${lvl.fraction * 100}%`;
   $('levelNext').textContent = `${fmtDuration(lvl.toNext)} of study to reach level ${lvl.level + 1}`;
 
@@ -1074,22 +1103,52 @@ async function deleteSubject(s) {
 
 // Each badge unlocks once its metric (see achievementMetrics) reaches the goal.
 const ACHIEVEMENTS = [
-  ...[1, 10, 25, 50, 100].map((n) => ({
+  ...[1, 10, 25, 50, 100, 250, 500, 1000].map((n) => ({
     id: `hours${n}`, emoji: '⏳', metric: 'hours', goal: n, unit: 'h',
     name: n === 1 ? '1 hour' : `${n} hours`, tip: `Focus for ${n} hour${n === 1 ? '' : 's'} in total`,
   })),
-  ...[3, 7, 14, 30].map((n) => ({
+  ...[3, 7, 14, 30, 60, 100].map((n) => ({
     id: `streak${n}`, emoji: '🔥', metric: 'streak', goal: n, unit: 'days',
     name: `${n}-day streak`, tip: `Study at least ${STREAK_MIN} min a day for ${n} days in a row`,
   })),
-  ...[1, 10, 50].map((n) => ({
+  ...[1, 10, 50, 100, 250].map((n) => ({
     id: `sessions${n}`, emoji: '✅', metric: 'sessions', goal: n, unit: n === 1 ? 'session' : 'sessions',
     name: n === 1 ? 'First session' : `${n} sessions`, tip: n === 1 ? 'Complete your first session' : `Complete ${n} sessions`,
   })),
   { id: 'week5', emoji: '📅', metric: 'bestWeek', goal: 5, unit: 'sessions',
     name: 'Busy week', tip: 'Complete 5 sessions in one week (Monday to Sunday)' },
+  { id: 'week10', emoji: '📅', metric: 'bestWeek', goal: 10, unit: 'sessions',
+    name: 'Super busy week', tip: 'Complete 10 sessions in one week (Monday to Sunday)' },
   { id: 'goal7', emoji: '🎯', metric: 'goalDays', goal: 7, unit: 'days',
     name: 'Goal getter', tip: 'Reach your daily goal on 7 different days' },
+  { id: 'goal30', emoji: '🎯', metric: 'goalDays', goal: 30, unit: 'days',
+    name: 'Goal crusher', tip: 'Reach your daily goal on 30 different days' },
+  { id: 'perfectWeek', emoji: '🗓️', metric: 'goalRun', goal: 7, unit: 'days',
+    name: 'Perfect week', tip: 'Reach your daily goal 7 days in a row' },
+  { id: 'earlyBird', emoji: '🌅', metric: 'earlyStarts', goal: 1, unit: 'session',
+    name: 'Early bird', tip: 'Start a session between 4:00 and 8:00' },
+  { id: 'nightOwl', emoji: '🦉', metric: 'lateStarts', goal: 1, unit: 'session',
+    name: 'Night owl', tip: 'Start a session between 22:00 and 4:00' },
+  { id: 'deepFocus', emoji: '🧠', metric: 'longestSession', goal: 90, unit: 'min',
+    name: 'Deep focus', tip: 'Focus for 90 minutes in one session' },
+  { id: 'marathon', emoji: '🏔️', metric: 'longestSession', goal: 180, unit: 'min',
+    name: 'Marathon', tip: 'Focus for 3 hours in one session' },
+  { id: 'bigDay', emoji: '💪', metric: 'bestDay', goal: 4, unit: 'h',
+    name: 'Big day', tip: 'Focus for 4 hours in a single day' },
+  { id: 'subjects3', emoji: '📚', metric: 'subjects', goal: 3, unit: 'subjects',
+    name: 'Explorer', tip: 'Study 3 different subjects' },
+  { id: 'subjects5', emoji: '📚', metric: 'subjects', goal: 5, unit: 'subjects',
+    name: 'Polymath', tip: 'Study 5 different subjects' },
+  { id: 'specialist', emoji: '🎓', metric: 'bestSubject', goal: 25, unit: 'h',
+    name: 'Specialist', tip: 'Study one subject for 25 hours in total' },
+  { id: 'weekend', emoji: '🎉', metric: 'weekends', goal: 1, unit: 'weekend',
+    name: 'Weekend warrior', tip: `Study at least ${STREAK_MIN} min on both Saturday and Sunday of the same weekend` },
+  { id: 'comeback', emoji: '🔄', metric: 'comebacks', goal: 1, unit: 'comeback',
+    name: 'Comeback', tip: 'Study again after a break of 7 days or more' },
+  ...[25, 100].map((n) => ({
+    id: `tasks${n}`, emoji: '✔️', metric: 'tasksDone', goal: n, unit: 'tasks',
+    name: n === 25 ? 'Task tackler' : 'Task master', tip: `Finish ${n} tasks`,
+  })),
 ];
 
 function achievementMetrics() {
@@ -1099,12 +1158,28 @@ function achievementMetrics() {
     perWeek[w] = (perWeek[w] || 0) + 1;
   }
   const goalMs = state.settings.dailyGoal * 60000;
+  const studied = Object.keys(state.history).filter((k) => dayMs(k) >= STREAK_MIN * 60000).sort();
+  const studiedSet = new Set(studied);
+  const DAY = 86400000;
+  const subjects = Object.entries(subjectTotals(null, null)).filter(([id, ms]) => id !== 'none' && ms > 0);
   return {
     hours: totalMinutes() / 60,
     streak: streaks().best,
     sessions: state.sessionCount,
     bestWeek: Math.max(0, ...Object.values(perWeek)),
     goalDays: Object.keys(state.history).filter((k) => dayMs(k) >= goalMs).length,
+    goalRun: longestRun(goalMs),
+    earlyStarts: state.records.earlyStarts,
+    lateStarts: state.records.lateStarts,
+    longestSession: state.records.longestSessionMs / 60000,
+    bestDay: Math.max(0, ...Object.keys(state.history).map(dayMs)) / 3600000,
+    subjects: subjects.length,
+    bestSubject: Math.max(0, ...subjects.map(([, ms]) => ms)) / 3600000,
+    // Saturdays studied whose Sunday was studied too.
+    weekends: studied.filter((k) => parseKey(k).getDay() === 6 && studiedSet.has(dayKey(addDays(parseKey(k), 1)))).length,
+    // Studied days with 7 or more days off before them (rounded: a DST change makes a day 23 or 25 h).
+    comebacks: studied.filter((k, i) => i > 0 && Math.round((parseKey(k) - parseKey(studied[i - 1])) / DAY) > 7).length,
+    tasksDone: state.records.tasksDone,
   };
 }
 
@@ -1147,7 +1222,7 @@ function renderAchievements() {
       badge.dataset.tip = `${a.tip} · unlocked ${date}`;
     } else {
       // Hours under 10 get one decimal, so the first badges show progress early on.
-      const shown = a.metric === 'hours' && value < 10 ? Math.floor(value * 10) / 10 : Math.floor(value);
+      const shown = a.unit === 'h' && value < 10 ? Math.floor(value * 10) / 10 : Math.floor(value);
       sub.textContent = `${shown}/${a.goal} ${a.unit}`;
       badge.dataset.tip = a.tip;
       const meter = document.createElement('div');
@@ -1261,6 +1336,7 @@ function initSettings() {
     state.sessionCount = 0;
     state.sessionLog = [];
     state.achievements = {};
+    state.records = { tasksDone: 0, earlyStarts: 0, lateStarts: 0, longestSessionMs: 0 };
     if (state.session) state.session.focusedMs = 0; // a running session starts counting from now
     save();
   });
