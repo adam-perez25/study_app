@@ -205,6 +205,25 @@
 
       <div class="card wide">
         <div class="by-subject-head">
+          <h2>📤 Share your progress</h2>
+          <div class="period" id="sharePeriod" role="group" aria-label="Card">
+            <button data-period="week" class="active">This week</button>
+            <button data-period="all">All time</button>
+          </div>
+        </div>
+        <div class="share">
+          <canvas id="shareCanvas" class="share-preview" width="1080" height="1080" aria-label="Share card preview"></canvas>
+          <div class="share-actions">
+            <button id="shareCopyImage" class="primary">📋 Copy image</button>
+            <button id="shareSaveImage">💾 Save image</button>
+            <button id="shareCopyText">📝 Copy as text</button>
+            <p class="summary" id="shareStatus" role="status"></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card wide">
+        <div class="by-subject-head">
           <h2>By subject</h2>
           <div class="period" id="subjectPeriod" role="group" aria-label="Period">
             <button data-period="week" class="active">This week</button>
