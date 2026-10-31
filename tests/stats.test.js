@@ -345,3 +345,85 @@ describe('achievements', () => {
     expect(plain(app.state.records)).toEqual({ tasksDone: 7, earlyStarts: 0, lateStarts: 0, longestSessionMs: 0 });
   });
 });
+
+describe('share cards', () => {
+  // DEFAULT_NOW is Wednesday 28 Oct 2026: this week is Mon 26 Oct (day -2) to Sun 1 Nov (day 4).
+  const saved = () => withHistory({
+    [day(-9)]: { math: 120 * MIN },             // last week
+    [day(-2)]: { math: 60 * MIN },
+    [day(-1)]: { bio: 30 * MIN, none: 50 * MIN },
+    [day(0)]: { bio: 5 * MIN },                 // under 10 min: not a study day
+  }, {
+    subjects: [{ id: 'math', name: 'Maths', color: 0, hidden: false }, { id: 'bio', name: 'Biology', color: 1, hidden: false }],
+    sessionLog: [day(-9), day(-2), day(-1), day(-1)],
+    sessionCount: 4,
+  });
+  const stats = (data) => Object.fromEntries(data.stats);
+
+  it('the week card sums this week only', () => {
+    app = loadApp({ saved: saved() });
+    const d = plain(app.run('shareData("week")'));
+    expect(d.title).toBe('My study week');
+    expect(d.range).toBe('Mon 26 Oct – Sun 1 Nov');
+    expect(d.big).toBe('2h 25m');
+    expect(stats(d)).toMatchObject({
+      'Sessions': '3', 'Days studied': '2/7', 'Daily goal met': '2/7', 'Best day': '1h 20m', 'Top subject': 'Maths',
+    });
+    expect(d.bars.map((b) => b.min)).toEqual([60, 80, 5, 0, 0, 0, 0]);
+  });
+
+  it('the all-time card covers everything', () => {
+    app = loadApp({ saved: saved() });
+    const d = plain(app.run('shareData("all")'));
+    expect(d.title).toBe('My study journey');
+    expect(d.range).toBe(`Since ${app.run(`fmtDay(parseKey('${day(-9)}'))`)}`);
+    expect(d.big).toBe('4h 25m');
+    expect(d.bars).toBeNull();
+    expect(stats(d)).toMatchObject({
+      'Sessions': '4', 'Days studied': '3', 'Best streak': '2 days', 'Best day': '2h', 'Top subject': 'Maths',
+    });
+    expect(stats(d)['Achievements']).toMatch(/^\d+\/36$/);
+  });
+
+  it('works with no study yet', () => {
+    app = loadApp();
+    const d = plain(app.run('shareData("all")'));
+    expect(d.range).toBe('Just getting started');
+    expect(stats(d)).toMatchObject({ 'Top subject': '—', 'Best day': '0m', 'Best streak': '0 days' });
+  });
+
+  it('the text version lists the same stats and the level', () => {
+    app = loadApp({ saved: saved() });
+    const text = app.run('shareText(shareData("week"))');
+    expect(text).toContain('📚 My study week (Mon 26 Oct – Sun 1 Nov)');
+    expect(text).toContain('2h 25m of focus this week');
+    expect(text).toContain('• Top subject: Maths');
+    expect(text).toContain('Level 2 · Apprentice (Bronze)');
+  });
+
+  it('the buttons copy and save the chosen card through the desktop app', async () => {
+    const calls = [];
+    const desktop = {
+      updateTimer: () => {}, toggleMini: () => {}, onCommand: () => {}, answerClose: () => {},
+      toggleFullScreen: () => {}, exitFullScreen: () => {}, onFullScreen: () => {}, openDndSettings: () => {},
+      copyImage: (url) => calls.push(['copyImage', url]),
+      copyText: (text) => calls.push(['copyText', text]),
+      saveImage: async (url, name) => { calls.push(['saveImage', url, name]); return true; },
+    };
+    app = loadApp({ saved: saved(), desktop });
+    app.$('shareCopyImage').click();
+    await Promise.resolve();
+    expect(calls[0]).toEqual(['copyImage', 'data:image/png;base64,AAAA']);
+    expect(app.$('shareStatus').textContent).toContain('copied');
+
+    app.window.document.querySelector('#sharePeriod [data-period="all"]').click();
+    app.$('shareCopyText').click();
+    await Promise.resolve();
+    expect(calls[1][1]).toContain('My study journey');
+
+    app.$('shareSaveImage').click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls[2]).toEqual(['saveImage', 'data:image/png;base64,AAAA', `study-all-time-${day(0)}.png`]);
+    expect(app.$('shareStatus').textContent).toBe('Image saved.');
+  });
+});

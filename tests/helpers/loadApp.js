@@ -34,6 +34,8 @@ function loadApp({ saved = null, rawSaved = null, now = DEFAULT_NOW, desktop = n
 
   // Browser bits jsdom doesn't have.
   window.scrollTo = () => {};
+  window.HTMLCanvasElement.prototype.getContext = () => null; // the share card skips drawing
+  window.HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,AAAA';
   window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   window.HTMLDialogElement.prototype.close = function () {
     this.open = false;

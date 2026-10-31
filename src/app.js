@@ -927,6 +927,7 @@ function renderStats() {
   renderHeatmap(today, goal);
   renderSubjectStats(today);
   renderAchievements();
+  renderShareCard();
 
   let bestDay = null;
   for (const k of Object.keys(state.history)) if (!bestDay || dayMs(k) > bestDay[1]) bestDay = [k, dayMs(k)];
@@ -1245,6 +1246,231 @@ function renderAchievements() {
   $('achievementCount').textContent = `${count} of ${ACHIEVEMENTS.length}`;
 }
 
+// ---------- Share cards ----------
+
+// An image (and a text version) of your week or all-time stats, to send to friends.
+let sharePeriod = 'week';
+// Same colours as the level tiers in styles.css.
+const TIER_COLORS = { Bronze: '#cd8a4f', Silver: '#9ea8b6', Gold: '#e6b422', Platinum: '#4fc3d9', Diamond: '#a78bfa' };
+
+// Name of the subject with the most time between start and end (null, null: all time), or '—'.
+function topSubjectName(start, end) {
+  const top = Object.entries(subjectTotals(start, end))
+    .filter(([id, ms]) => id !== 'none' && ms > 0)
+    .sort((a, b) => b[1] - a[1])[0];
+  return top ? subjectName(top[0]) : '—';
+}
+
+function shareData(period) {
+  const today = new Date();
+  const total = totalMinutes();
+  const level = levelInfo(total);
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const { cur, best } = streaks();
+
+  if (period === 'week') {
+    const start = startOfWeek(today);
+    const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+    const minutes = days.map(minutesOn);
+    const keys = days.map(dayKey);
+    const weekMin = minutes.reduce((a, b) => a + b, 0);
+    return {
+      period,
+      title: 'My study week',
+      range: `${fmtDay(start)} – ${fmtDay(days[6])}`,
+      big: fmtShort(weekMin),
+      bigLabel: 'of focus this week',
+      stats: [
+        ['Sessions', String(state.sessionLog.filter((k) => keys.includes(k)).length)],
+        ['Days studied', `${minutes.filter((m) => m >= STREAK_MIN).length}/7`],
+        ['Daily goal met', `${minutes.filter((m) => m >= state.settings.dailyGoal).length}/7`],
+        ['Current streak', plural(cur, 'day')],
+        ['Best day', fmtShort(Math.max(...minutes))],
+        ['Top subject', topSubjectName(start, days[6])],
+      ],
+      bars: days.map((d, i) => ({ label: d.toLocaleDateString(LOCALE, { weekday: 'short' }), min: minutes[i] })),
+      level,
+    };
+  }
+
+  const first = Object.keys(state.history).filter((k) => dayMs(k) > 0).sort()[0];
+  const studiedDays = Object.keys(state.history).filter((k) => dayMs(k) >= STREAK_MIN * 60000).length;
+  return {
+    period,
+    title: 'My study journey',
+    range: first ? `Since ${fmtDay(parseKey(first))}` : 'Just getting started',
+    big: fmtShort(total),
+    bigLabel: 'of focus in total',
+    stats: [
+      ['Sessions', String(state.sessionCount)],
+      ['Days studied', String(studiedDays)],
+      ['Best streak', plural(best, 'day')],
+      ['Achievements', `${ACHIEVEMENTS.filter((a) => state.achievements[a.id]).length}/${ACHIEVEMENTS.length}`],
+      ['Best day', fmtShort(Math.max(0, ...Object.keys(state.history).map(dayMs)) / 60000)],
+      ['Top subject', topSubjectName(null, null)],
+    ],
+    bars: null,
+    level,
+  };
+}
+
+// The same card as plain text, for chats that don't take images.
+function shareText(data) {
+  return [
+    `📚 ${data.title} (${data.range})`,
+    `⏱️ ${data.big} ${data.bigLabel}`,
+    ...data.stats.map(([label, value]) => `• ${label}: ${value}`),
+    `⭐ Level ${data.level.level} · ${data.level.title} (${data.level.tier})`,
+    '— Study Timer',
+  ].join('\n');
+}
+
+// Draws the card on a 1080×1080 canvas, a square that fits most chat apps.
+// It uses the app's own colours (light or dark, whichever theme is showing), like a card on the Stats screen.
+function drawShareCard(canvas, data) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return; // no canvas support (tests)
+  const W = 1080, PAD = 80, FONT = '"Segoe UI", system-ui, sans-serif';
+  const css = getComputedStyle(document.documentElement);
+  const color = (name) => css.getPropertyValue(name).trim();
+  const CARD = color('--card'), TEXT = color('--text'), MUTED = color('--muted');
+  const BORDER = color('--border'), FOCUS = color('--focus');
+  const tier = TIER_COLORS[data.level.tier];
+  canvas.width = canvas.height = W;
+
+  ctx.fillStyle = CARD;
+  ctx.fillRect(0, 0, W, W);
+  ctx.fillStyle = FOCUS;
+  ctx.fillRect(0, 0, W, 12);
+
+  const text = (str, x, y, size, fill, { weight = 400, align = 'left' } = {}) => {
+    ctx.font = `${weight} ${size}px ${FONT}`;
+    ctx.fillStyle = fill;
+    ctx.textAlign = align;
+    ctx.fillText(str, x, y);
+  };
+
+  text('STUDY TIMER', PAD, 110, 28, FOCUS, { weight: 700 });
+  text(data.title, PAD, 190, 64, TEXT, { weight: 700 });
+  text(data.range, PAD, 245, 34, MUTED);
+  text(data.big, PAD, 420, 150, TEXT, { weight: 700 });
+  text(data.bigLabel, PAD, 480, 38, MUTED);
+
+  // Stats: 3 columns, 2 rows.
+  const colW = (W - PAD * 2) / 3;
+  data.stats.forEach(([label, value], i) => {
+    const x = PAD + (i % 3) * colW, y = 590 + Math.floor(i / 3) * 120;
+    let shown = value;
+    ctx.font = `700 46px ${FONT}`;
+    while (shown.length > 1 && ctx.measureText(shown).width > colW - 20) shown = shown.slice(0, -2) + '…';
+    text(shown, x, y, 46, TEXT, { weight: 700 });
+    text(label, x, y + 42, 26, MUTED);
+  });
+
+  const levelLine = `Level ${data.level.level} · ${data.level.title}`;
+  if (data.bars) {
+    // This week's days as bars, like the Stats chart: faded red, full red once the daily goal is met.
+    const goal = state.settings.dailyGoal;
+    const max = Math.max(goal, ...data.bars.map((b) => b.min));
+    const top = 810, height = 120, slot = (W - PAD * 2) / 7, barW = slot * 0.5;
+    data.bars.forEach((b, i) => {
+      const x = PAD + i * slot + (slot - barW) / 2;
+      if (b.min) {
+        const h = Math.max(8, (b.min / max) * height);
+        ctx.fillStyle = FOCUS;
+        ctx.globalAlpha = b.min >= goal ? 1 : 0.5;
+        ctx.beginPath();
+        ctx.roundRect(x, top + height - h, barW, h, [8, 8, 0, 0]);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.fillStyle = BORDER;
+        ctx.fillRect(x, top + height - 4, barW, 4);
+      }
+      text(b.label, x + barW / 2, top + height + 36, 24, MUTED, { align: 'center' });
+    });
+    text(levelLine, PAD, 1035, 30, TEXT, { weight: 600 });
+  } else {
+    // All time: the level with its progress bar.
+    text(levelLine, PAD, 860, 48, TEXT, { weight: 700 });
+    // Rounded meter in the tier colour, like the level card on the Stats screen.
+    ctx.fillStyle = BORDER;
+    ctx.beginPath();
+    ctx.roundRect(PAD, 890, W - PAD * 2, 22, 11);
+    ctx.fill();
+    ctx.fillStyle = tier;
+    ctx.beginPath();
+    ctx.roundRect(PAD, 890, Math.max(22, (W - PAD * 2) * data.level.fraction), 22, 11);
+    ctx.fill();
+    text(`${fmtDuration(data.level.toNext)} to level ${data.level.level + 1}`, PAD, 955, 28, MUTED);
+  }
+  // Tier pill, bottom right.
+  ctx.font = `700 26px ${FONT}`;
+  const pillW = ctx.measureText(data.level.tier.toUpperCase()).width + 40;
+  ctx.fillStyle = tier;
+  ctx.beginPath();
+  ctx.roundRect(W - PAD - pillW, 1000, pillW, 46, 23);
+  ctx.fill();
+  text(data.level.tier.toUpperCase(), W - PAD - pillW / 2, 1032, 26, '#1d2330', { weight: 700, align: 'center' });
+}
+
+function renderShareCard() {
+  drawShareCard($('shareCanvas'), shareData(sharePeriod));
+}
+
+// Shows a short message next to the share buttons ("Copied!").
+let shareStatusTimer = null;
+function shareStatus(msg) {
+  $('shareStatus').textContent = msg;
+  clearTimeout(shareStatusTimer);
+  shareStatusTimer = setTimeout(() => { $('shareStatus').textContent = ''; }, 2500);
+}
+
+function initShare() {
+  document.querySelectorAll('#sharePeriod button').forEach((b) => {
+    b.addEventListener('click', () => {
+      sharePeriod = b.dataset.period;
+      document.querySelectorAll('#sharePeriod button').forEach((x) => x.classList.toggle('active', x === b));
+      renderShareCard();
+    });
+  });
+  const fileName = () => `study-${sharePeriod === 'week' ? 'week' : 'all-time'}-${dayKey(new Date())}.png`;
+
+  // The desktop app copies and saves through Electron; a plain browser uses its own clipboard and downloads.
+  $('shareCopyImage').addEventListener('click', async () => {
+    const url = $('shareCanvas').toDataURL('image/png');
+    try {
+      if (window.desktop) window.desktop.copyImage(url);
+      else {
+        const blob = await (await fetch(url)).blob();
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      }
+      shareStatus('Image copied! Paste it in a chat.');
+    } catch { shareStatus('Couldn’t copy the image. Try Save image.'); }
+  });
+  $('shareSaveImage').addEventListener('click', async () => {
+    const url = $('shareCanvas').toDataURL('image/png');
+    if (window.desktop) {
+      try {
+        if (await window.desktop.saveImage(url, fileName())) shareStatus('Image saved.');
+      } catch { shareStatus('Couldn’t save the image.'); }
+    } else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName();
+      a.click();
+    }
+  });
+  $('shareCopyText').addEventListener('click', async () => {
+    const str = shareText(shareData(sharePeriod));
+    try {
+      if (window.desktop) window.desktop.copyText(str);
+      else await navigator.clipboard.writeText(str);
+      shareStatus('Text copied!');
+    } catch { shareStatus('Couldn’t copy the text.'); }
+  });
+}
+
 function initStats() {
   document.querySelectorAll('#subjectPeriod button').forEach((b) => {
     b.addEventListener('click', () => {
@@ -1368,6 +1594,7 @@ initSetup();
 initSubjects();
 initSession();
 initStats();
+initShare();
 initSettings();
 initSound();
 renderTasks();

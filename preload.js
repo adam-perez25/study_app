@@ -12,6 +12,9 @@ contextBridge.exposeInMainWorld('desktop', {
   exitFullScreen: () => ipcRenderer.send('fullscreen:exit'),
   onFullScreen: (cb) => ipcRenderer.on('fullscreen', (_e, on) => cb(on)),
   openDndSettings: () => ipcRenderer.send('dnd:open'),
+  copyImage: (dataUrl) => ipcRenderer.send('share:copy-image', dataUrl),
+  copyText: (text) => ipcRenderer.send('share:copy-text', text),
+  saveImage: (dataUrl, name) => ipcRenderer.invoke('share:save-image', dataUrl, name), // resolves true once saved
   // Mini timer
   onTimer: (cb) => ipcRenderer.on('timer', (_e, snapshot) => cb(snapshot)),
   sendCommand: (cmd) => ipcRenderer.send('mini:command', cmd),

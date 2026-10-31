@@ -1,5 +1,5 @@
 // Electron entry point: opens the app in its own desktop window, plus the floating mini timer.
-const { app, BrowserWindow, screen, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, shell, clipboard, nativeImage, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -166,6 +166,25 @@ ipcMain.on('fullscreen:exit', () => mainWin?.setFullScreen(false));
 // Windows has no supported way for apps to switch Do not disturb on, so open the
 // Notifications page of Windows Settings, where its switch is at the top.
 ipcMain.on('dnd:open', () => shell.openExternal('ms-settings:notifications'));
+
+// Share cards: the page draws the card and sends it as a PNG data URL.
+const isPng = (url) => typeof url === 'string' && url.startsWith('data:image/png;base64,');
+ipcMain.on('share:copy-image', (_e, url) => {
+  if (isPng(url)) clipboard.writeImage(nativeImage.createFromDataURL(url));
+});
+ipcMain.on('share:copy-text', (_e, text) => {
+  if (typeof text === 'string') clipboard.writeText(text);
+});
+ipcMain.handle('share:save-image', async (_e, url, name) => {
+  if (!isPng(url) || !mainWin) return false;
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWin, {
+    defaultPath: path.join(app.getPath('pictures'), path.basename(String(name))),
+    filters: [{ name: 'PNG image', extensions: ['png'] }],
+  });
+  if (canceled || !filePath) return false;
+  fs.writeFileSync(filePath, nativeImage.createFromDataURL(url).toPNG());
+  return true;
+});
 
 // Buttons on the mini timer.
 ipcMain.on('mini:command', (_e, cmd) => {
