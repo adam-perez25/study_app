@@ -1326,33 +1326,34 @@ function shareText(data) {
 }
 
 // Draws the card on a 1080×1080 canvas, a square that fits most chat apps.
+// It uses the app's own colours (light or dark, whichever theme is showing), like a card on the Stats screen.
 function drawShareCard(canvas, data) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return; // no canvas support (tests)
   const W = 1080, PAD = 80, FONT = '"Segoe UI", system-ui, sans-serif';
-  const accent = TIER_COLORS[data.level.tier];
+  const css = getComputedStyle(document.documentElement);
+  const color = (name) => css.getPropertyValue(name).trim();
+  const CARD = color('--card'), TEXT = color('--text'), MUTED = color('--muted');
+  const BORDER = color('--border'), FOCUS = color('--focus');
+  const tier = TIER_COLORS[data.level.tier];
   canvas.width = canvas.height = W;
 
-  const bg = ctx.createLinearGradient(0, 0, W, W);
-  bg.addColorStop(0, '#1d2330');
-  bg.addColorStop(1, '#2d3a57');
-  ctx.fillStyle = bg;
+  ctx.fillStyle = CARD;
   ctx.fillRect(0, 0, W, W);
-  ctx.fillStyle = accent;
-  ctx.fillRect(0, 0, W, 14);
+  ctx.fillStyle = FOCUS;
+  ctx.fillRect(0, 0, W, 12);
 
-  const text = (str, x, y, size, color, { weight = 400, align = 'left' } = {}) => {
+  const text = (str, x, y, size, fill, { weight = 400, align = 'left' } = {}) => {
     ctx.font = `${weight} ${size}px ${FONT}`;
-    ctx.fillStyle = color;
+    ctx.fillStyle = fill;
     ctx.textAlign = align;
     ctx.fillText(str, x, y);
   };
-  const MUTED = '#9aa1ad', WHITE = '#ffffff';
 
-  text('STUDY TIMER', PAD, 110, 28, accent, { weight: 700 });
-  text(data.title, PAD, 190, 64, WHITE, { weight: 700 });
+  text('STUDY TIMER', PAD, 110, 28, FOCUS, { weight: 700 });
+  text(data.title, PAD, 190, 64, TEXT, { weight: 700 });
   text(data.range, PAD, 245, 34, MUTED);
-  text(data.big, PAD, 420, 150, WHITE, { weight: 700 });
+  text(data.big, PAD, 420, 150, TEXT, { weight: 700 });
   text(data.bigLabel, PAD, 480, 38, MUTED);
 
   // Stats: 3 columns, 2 rows.
@@ -1362,37 +1363,51 @@ function drawShareCard(canvas, data) {
     let shown = value;
     ctx.font = `700 46px ${FONT}`;
     while (shown.length > 1 && ctx.measureText(shown).width > colW - 20) shown = shown.slice(0, -2) + '…';
-    text(shown, x, y, 46, WHITE, { weight: 700 });
+    text(shown, x, y, 46, TEXT, { weight: 700 });
     text(label, x, y + 42, 26, MUTED);
   });
 
   const levelLine = `Level ${data.level.level} · ${data.level.title}`;
   if (data.bars) {
-    // This week's days as bars; days that met the daily goal get the tier colour.
+    // This week's days as bars, like the Stats chart: faded red, full red once the daily goal is met.
     const goal = state.settings.dailyGoal;
     const max = Math.max(goal, ...data.bars.map((b) => b.min));
-    const top = 810, height = 120, slot = (W - PAD * 2) / 7, barW = slot * 0.6;
+    const top = 810, height = 120, slot = (W - PAD * 2) / 7, barW = slot * 0.5;
     data.bars.forEach((b, i) => {
       const x = PAD + i * slot + (slot - barW) / 2;
-      const h = b.min ? Math.max(6, (b.min / max) * height) : 3;
-      ctx.fillStyle = b.min >= goal ? accent : '#5b6578';
-      ctx.fillRect(x, top + height - h, barW, h);
+      if (b.min) {
+        const h = Math.max(8, (b.min / max) * height);
+        ctx.fillStyle = FOCUS;
+        ctx.globalAlpha = b.min >= goal ? 1 : 0.5;
+        ctx.beginPath();
+        ctx.roundRect(x, top + height - h, barW, h, [8, 8, 0, 0]);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.fillStyle = BORDER;
+        ctx.fillRect(x, top + height - 4, barW, 4);
+      }
       text(b.label, x + barW / 2, top + height + 36, 24, MUTED, { align: 'center' });
     });
-    text(levelLine, PAD, 1035, 30, WHITE, { weight: 600 });
+    text(levelLine, PAD, 1035, 30, TEXT, { weight: 600 });
   } else {
     // All time: the level with its progress bar.
-    text(levelLine, PAD, 860, 48, WHITE, { weight: 700 });
-    ctx.fillStyle = '#3a4560';
-    ctx.fillRect(PAD, 890, W - PAD * 2, 22);
-    ctx.fillStyle = accent;
-    ctx.fillRect(PAD, 890, (W - PAD * 2) * data.level.fraction, 22);
+    text(levelLine, PAD, 860, 48, TEXT, { weight: 700 });
+    // Rounded meter in the tier colour, like the level card on the Stats screen.
+    ctx.fillStyle = BORDER;
+    ctx.beginPath();
+    ctx.roundRect(PAD, 890, W - PAD * 2, 22, 11);
+    ctx.fill();
+    ctx.fillStyle = tier;
+    ctx.beginPath();
+    ctx.roundRect(PAD, 890, Math.max(22, (W - PAD * 2) * data.level.fraction), 22, 11);
+    ctx.fill();
     text(`${fmtDuration(data.level.toNext)} to level ${data.level.level + 1}`, PAD, 955, 28, MUTED);
   }
   // Tier pill, bottom right.
   ctx.font = `700 26px ${FONT}`;
   const pillW = ctx.measureText(data.level.tier.toUpperCase()).width + 40;
-  ctx.fillStyle = accent;
+  ctx.fillStyle = tier;
   ctx.beginPath();
   ctx.roundRect(W - PAD - pillW, 1000, pillW, 46, 23);
   ctx.fill();

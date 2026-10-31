@@ -328,7 +328,7 @@ body.paused .time { opacity: .5; }
 .period button { font-size: .8rem; padding: 5px 10px; }
 .period button.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 .share { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
-.share-preview { width: 100%; max-width: 320px; height: auto; aspect-ratio: 1; border-radius: var(--radius); }
+.share-preview { width: 100%; max-width: 320px; height: auto; aspect-ratio: 1; border: 1px solid var(--border); border-radius: var(--radius); }
 .share-actions { display: flex; flex-direction: column; gap: 8px; min-width: 180px; }
 .share-actions .summary { min-height: 1.4em; margin: 0; }
 
