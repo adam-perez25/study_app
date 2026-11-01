@@ -74,3 +74,7 @@ The tests use [Vitest](https://vitest.dev/) and load `src/index.html` and `src/a
 | `tests/` | Vitest tests (`planning`, `session`, `stats`) and `helpers/loadApp.js`, which loads the app into jsdom |
 | `tools/make-shortcut.ps1`, `tools/make-shortcut.js` | Create the desktop and Start Menu shortcuts |
 | `tools/make-icon.ps1` | Draws the icon into `assets/` |
+
+## Roadmap
+
+- **See all levels and tiers:** right now the 📊 Stats screen only shows your current level. Add a way (for example, clicking the level badge) to see every level from Beginner to Transcendent, the hours each one needs, and the tier colour it belongs to (Bronze, Silver, Gold, Platinum, Diamond), with the ones you've reached marked and the hours left until the next one.
