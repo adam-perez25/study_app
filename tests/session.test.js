@@ -48,7 +48,7 @@ describe('blocks switching over time', () => {
     app = startOneHour();
     app.advance(2 * 60 * MIN);
     expect(app.state.session).toBeNull();
-    expect(focusToday(app)).toBe(50 * MIN);
+    expect(focusToday(app)).toBe(60 * MIN);
     expect(app.state.sessionCount).toBe(1);
     expect(app.state.sessionLog).toEqual([TODAY]);
     expect(app.$('done').classList.contains('hidden')).toBe(false);
@@ -127,12 +127,12 @@ describe('skipping a block', () => {
 
   it('skipping the last block ends the session early', () => {
     app = startOneHour();
-    app.advance(30 * MIN); // now in the last focus block
+    app.advance(60 * MIN); // now in the last (10 min) focus block
     app.advance(5 * MIN);
     app.run('skipBlock()');
     expect(app.state.session).toBeNull();
-    expect(focusToday(app)).toBe(30 * MIN);
-    expect(app.$('doneSummary').textContent).toMatch(/^Session ended early\. You completed 30 min of focus/);
+    expect(focusToday(app)).toBe(55 * MIN);
+    expect(app.$('doneSummary').textContent).toMatch(/^Session ended early\. You completed 55 min of focus/);
   });
 });
 
@@ -181,8 +181,8 @@ describe('ending a session', () => {
       tasks: [{ id: 1, text: 'a', done: true }, { id: 2, text: 'b', done: false }],
       session: null,
     });
-    app.advance(60 * MIN);
-    expect(app.$('doneSummary').textContent).toBe('You completed 50 min of focus and 1 of 2 tasks.');
+    app.advance(70 * MIN);
+    expect(app.$('doneSummary').textContent).toBe('You completed 1 h of focus and 1 of 2 tasks.');
   });
 });
 

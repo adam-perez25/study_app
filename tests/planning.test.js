@@ -13,22 +13,23 @@ describe('buildPlan', () => {
   const plan = (over) => plain(app.window.buildPlan(settings(over)));
   const total = (blocks) => blocks.reduce((a, b) => a + b.min, 0);
 
-  it('never makes a focus block longer than the chosen focus length', () => {
-    // 1 hour used to end with a 30 min focus block.
+  const focusTotal = (blocks) => total(blocks.filter((b) => b.type === 'focus'));
+
+  it('treats the chosen time as study time: 30 min is 25 focus, 5 break, 5 focus', () => {
+    expect(plan({ hours: 0, minutes: 30 })).toEqual([
+      { type: 'focus', min: 25 },
+      { type: 'short', min: 5 },
+      { type: 'focus', min: 5 },
+    ]);
+  });
+
+  it('adds breaks on top of 1 hour of study without making a focus block longer than the focus length', () => {
     expect(plan()).toEqual([
       { type: 'focus', min: 25 },
       { type: 'short', min: 5 },
       { type: 'focus', min: 25 },
-    ]);
-  });
-
-  it('puts the leftover in a short extra focus block when a break still fits', () => {
-    expect(plan({ minutes: 3 })).toEqual([
-      { type: 'focus', min: 25 },
       { type: 'short', min: 5 },
-      { type: 'focus', min: 25 },
-      { type: 'short', min: 5 },
-      { type: 'focus', min: 3 },
+      { type: 'focus', min: 10 },
     ]);
   });
 
@@ -49,11 +50,9 @@ describe('buildPlan', () => {
 
   it.each([
     [0, 5], [0, 30], [0, 45], [1, 0], [1, 35], [2, 10], [4, 0], [12, 59],
-  ])('for %ih %im: blocks fit the chosen time, respect the focus length and never end on a break', (hours, minutes) => {
+  ])('for %ih %im: focus adds up to the chosen time, respects the focus length and never ends on a break', (hours, minutes) => {
     const blocks = plan({ hours, minutes });
-    // Leftover time too short for a break plus a focus block is dropped (at most one long break).
-    expect(total(blocks)).toBeLessThanOrEqual(hours * 60 + minutes);
-    expect(total(blocks)).toBeGreaterThanOrEqual(hours * 60 + minutes - 15);
+    expect(focusTotal(blocks)).toBe(hours * 60 + minutes);
     blocks.filter((b) => b.type === 'focus').forEach((b) => expect(b.min).toBeLessThanOrEqual(25));
     expect(blocks.at(-1).type).toBe('focus');
     expect(blocks[0].type).toBe('focus');
@@ -63,7 +62,7 @@ describe('buildPlan', () => {
 
   it('works with unusual block settings (long focus, long breaks every 2)', () => {
     const blocks = plan({ hours: 5, focusLen: 120, shortLen: 30, longLen: 60, longEvery: 2 });
-    expect(total(blocks)).toBeLessThanOrEqual(300);
+    expect(focusTotal(blocks)).toBe(300);
     expect(blocks.at(-1).type).toBe('focus');
     blocks.filter((b) => b.type === 'focus').forEach((b) => expect(b.min).toBeLessThanOrEqual(120));
   });
