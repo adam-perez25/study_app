@@ -13,11 +13,22 @@ describe('buildPlan', () => {
   const plan = (over) => plain(app.window.buildPlan(settings(over)));
   const total = (blocks) => blocks.reduce((a, b) => a + b.min, 0);
 
-  it('splits 1 hour into focus blocks with a short break, folding the leftover into the last block', () => {
+  it('never makes a focus block longer than the chosen focus length', () => {
+    // 1 hour used to end with a 30 min focus block.
     expect(plan()).toEqual([
       { type: 'focus', min: 25 },
       { type: 'short', min: 5 },
-      { type: 'focus', min: 30 },
+      { type: 'focus', min: 25 },
+    ]);
+  });
+
+  it('puts the leftover in a short extra focus block when a break still fits', () => {
+    expect(plan({ minutes: 3 })).toEqual([
+      { type: 'focus', min: 25 },
+      { type: 'short', min: 5 },
+      { type: 'focus', min: 25 },
+      { type: 'short', min: 5 },
+      { type: 'focus', min: 3 },
     ]);
   });
 
@@ -38,9 +49,12 @@ describe('buildPlan', () => {
 
   it.each([
     [0, 5], [0, 30], [0, 45], [1, 0], [1, 35], [2, 10], [4, 0], [12, 59],
-  ])('for %ih %im: blocks add up to the chosen time and never end on a break', (hours, minutes) => {
+  ])('for %ih %im: blocks fit the chosen time, respect the focus length and never end on a break', (hours, minutes) => {
     const blocks = plan({ hours, minutes });
-    expect(total(blocks)).toBe(hours * 60 + minutes);
+    // Leftover time too short for a break plus a focus block is dropped (at most one long break).
+    expect(total(blocks)).toBeLessThanOrEqual(hours * 60 + minutes);
+    expect(total(blocks)).toBeGreaterThanOrEqual(hours * 60 + minutes - 15);
+    blocks.filter((b) => b.type === 'focus').forEach((b) => expect(b.min).toBeLessThanOrEqual(25));
     expect(blocks.at(-1).type).toBe('focus');
     expect(blocks[0].type).toBe('focus');
     // Focus and breaks alternate.
@@ -49,8 +63,9 @@ describe('buildPlan', () => {
 
   it('works with unusual block settings (long focus, long breaks every 2)', () => {
     const blocks = plan({ hours: 5, focusLen: 120, shortLen: 30, longLen: 60, longEvery: 2 });
-    expect(total(blocks)).toBe(300);
+    expect(total(blocks)).toBeLessThanOrEqual(300);
     expect(blocks.at(-1).type).toBe('focus');
+    blocks.filter((b) => b.type === 'focus').forEach((b) => expect(b.min).toBeLessThanOrEqual(120));
   });
 });
 

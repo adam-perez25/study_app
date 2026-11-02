@@ -48,7 +48,7 @@ describe('blocks switching over time', () => {
     app = startOneHour();
     app.advance(2 * 60 * MIN);
     expect(app.state.session).toBeNull();
-    expect(focusToday(app)).toBe(55 * MIN);
+    expect(focusToday(app)).toBe(50 * MIN);
     expect(app.state.sessionCount).toBe(1);
     expect(app.state.sessionLog).toEqual([TODAY]);
     expect(app.$('done').classList.contains('hidden')).toBe(false);
@@ -62,12 +62,12 @@ describe('blocks switching over time', () => {
     const s = app.state.session;
     expect(s.index).toBe(2);
     expect(s.waiting).toBe(true);
-    expect(s.pausedRemaining).toBe(30 * MIN); // nothing of the focus block used up while away
+    expect(s.pausedRemaining).toBe(25 * MIN); // nothing of the focus block used up while away
     expect(app.$('pauseBtn').textContent).toBe('I’m back');
 
     app.run('togglePause()'); // "I'm back"
     expect(app.state.session.waiting).toBe(false);
-    expect(app.state.session.endsAt).toBe(app.now() + 30 * MIN);
+    expect(app.state.session.endsAt).toBe(app.now() + 25 * MIN);
   });
 });
 
@@ -182,7 +182,7 @@ describe('ending a session', () => {
       session: null,
     });
     app.advance(60 * MIN);
-    expect(app.$('doneSummary').textContent).toBe('You completed 55 min of focus and 1 of 2 tasks.');
+    expect(app.$('doneSummary').textContent).toBe('You completed 50 min of focus and 1 of 2 tasks.');
   });
 });
 
