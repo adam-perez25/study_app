@@ -253,7 +253,7 @@ describe('achievements', () => {
   it('finishing a session announces new badges on the done screen', () => {
     app = loadApp();
     app.run('startSession()');
-    app.advance(60 * MIN);
+    app.advance(70 * MIN);
     expect(app.$('doneAchievements').hidden).toBe(false);
     expect(app.$('doneAchievements').textContent).toContain('First session');
   });
@@ -309,11 +309,11 @@ describe('achievements', () => {
   });
 
   it('records the start time and length of finished sessions', () => {
-    // 7:00 start: early bird. A 2 h session at 25-min focus blocks ends with 100 min of focus.
+    // 7:00 start: early bird. 2 h of study at 25-min focus blocks, plus 30 min of breaks, takes 150 min.
     app = loadApp({ now: new Date(2026, 9, 28, 7, 0).getTime(),
       saved: withHistory({}, { settings: { ...BASE_SETTINGS, hours: 2 } }) });
     app.run('startSession()');
-    app.advance(120 * MIN);
+    app.advance(150 * MIN);
     expect(app.state.session).toBeNull();
     expect(app.state.records).toMatchObject({ earlyStarts: 1, lateStarts: 0 });
     expect(app.run('achievementMetrics()').longestSession).toBeGreaterThanOrEqual(90);
@@ -325,7 +325,7 @@ describe('achievements', () => {
   it('a session started after 22:00 unlocks "Night owl"', () => {
     app = loadApp({ now: new Date(2026, 9, 28, 23, 0).getTime() });
     app.run('startSession()');
-    app.advance(60 * MIN);
+    app.advance(70 * MIN);
     expect(app.state.records.lateStarts).toBe(1);
     expect(app.state.achievements.nightOwl).toBeTruthy();
   });

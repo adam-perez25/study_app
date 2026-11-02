@@ -40,8 +40,9 @@ function save() {
 
 // ---------- Session planning ----------
 
-// Builds the list of blocks for a session. The total time includes breaks,
-// and a session never ends on a break.
+// Builds the list of blocks for a session. The chosen time is study time:
+// focus blocks add up to it and breaks go between them on top, so a session
+// never ends on a break.
 function buildPlan({ hours, minutes, focusLen, shortLen, longLen, longEvery }) {
   let remaining = hours * 60 + minutes;
   const blocks = [];
@@ -55,12 +56,7 @@ function buildPlan({ hours, minutes, focusLen, shortLen, longLen, longEvery }) {
     if (remaining <= 0) break;
 
     const isLong = focusCount % longEvery === 0;
-    const brk = isLong ? longLen : shortLen;
-    // No room for a break plus some focus: drop the leftover rather than
-    // making a focus block longer than focusLen.
-    if (remaining <= brk) break;
-    blocks.push({ type: isLong ? 'long' : 'short', min: brk });
-    remaining -= brk;
+    blocks.push({ type: isLong ? 'long' : 'short', min: isLong ? longLen : shortLen });
   }
   return blocks;
 }
