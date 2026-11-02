@@ -56,11 +56,9 @@ function buildPlan({ hours, minutes, focusLen, shortLen, longLen, longEvery }) {
 
     const isLong = focusCount % longEvery === 0;
     const brk = isLong ? longLen : shortLen;
-    // Too little time left for a break plus a useful block: add it to the last block.
-    if (remaining - brk < 5) {
-      blocks[blocks.length - 1].min += remaining;
-      break;
-    }
+    // No room for a break plus some focus: drop the leftover rather than
+    // making a focus block longer than focusLen.
+    if (remaining <= brk) break;
     blocks.push({ type: isLong ? 'long' : 'short', min: brk });
     remaining -= brk;
   }
@@ -129,10 +127,11 @@ function updatePreview() {
 
   const focusBlocks = blocks.filter((b) => b.type === 'focus');
   const focusMin = focusBlocks.reduce((a, b) => a + b.min, 0);
+  const planMin = blocks.reduce((a, b) => a + b.min, 0);
   const total = state.settings.hours * 60 + state.settings.minutes;
   $('planSummary').textContent = total
     ? `${focusBlocks.length} focus block${focusBlocks.length === 1 ? '' : 's'} · ` +
-      `${fmtMinutes(focusMin)} of focus · ${fmtMinutes(total - focusMin)} of breaks`
+      `${fmtMinutes(focusMin)} of focus · ${fmtMinutes(planMin - focusMin)} of breaks`
     : 'Choose how long you want to study.';
   $('startBtn').disabled = !total;
 

@@ -44,7 +44,7 @@ The tests use [Vitest](https://vitest.dev/) and load `src/index.html` and `src/a
 
 ## How it works
 
-- **Total time includes breaks.** 1 h → 25 min focus, 5 min break, 30 min focus. The session never ends on a break; leftover minutes are added to the last block.
+- **Total time includes breaks.** 1 h 3 min → 25 min focus, 5 min break, 25 min focus, 5 min break, 3 min focus. Focus blocks never go over the length you chose, and the session never ends on a break; if the leftover is too short for a break plus some focus, it's dropped (so 1 h → 25 + 5 + 25 = 55 min).
 - **Block settings** (focus length, break lengths, long break frequency) are under "Block settings" on the start screen.
 - A chime and a Windows notification mark each change between focus and break. Pick the chime (Bells, Soft, Digital or Marimba) and the volume, or mute it ("library mode"), under Sound in ⚙ Settings; the 🔔 button on the timer mutes it too.
 - **"I'm back":** by default the next focus block starts by itself when a break ends. Untick **Start focus blocks automatically after a break** in ⚙ Settings (or under Block settings) and the next focus block waits until you click **I'm back** (or ▶ on the mini timer), so it never runs while you're away. Breaks always start by themselves.
