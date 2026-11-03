@@ -78,3 +78,4 @@ The tests use [Vitest](https://vitest.dev/) and load `src/index.html` and `src/a
 ## Roadmap
 
 - **See all levels and tiers:** right now the 📊 Stats screen only shows your current level. Add a way (for example, clicking the level badge) to see every level from Beginner to Transcendent, the hours each one needs, and the tier colour it belongs to (Bronze, Silver, Gold, Platinum, Diamond), with the ones you've reached marked and the hours left until the next one.
+- **Skip breaks:** add a "No breaks" option on the setup screen, before you start, so the whole session is one focus block with no short or long breaks. The chosen time is then all study time. It could be a checkbox next to the time picker (remembered in settings), and the plan preview should update to show a single focus block.
