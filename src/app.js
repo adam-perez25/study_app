@@ -29,6 +29,8 @@ state.settings.sound.muted ??= false;
 state.settings.noBreaks ??= false; // on: the whole session is one focus block, with no breaks
 state.plans ??= [];   // { id, name, type: 'Exam' | 'Project', subjectId, created, deadline: 'YYYY-MM-DD', needMin }
 state.planned ??= {}; // { 'YYYY-MM-DD': { planId: minutes planned that day } }
+state.planHistory ??= {}; // { 'YYYY-MM-DD': { planId: focused ms } }: the sessions you did for each plan
+state.settings.planId ??= null; // plan the next session counts toward: a plan id, 'none', or null to pick one automatically
 // Days saved before subjects existed were plain totals; keep them as "no subject".
 for (const [k, v] of Object.entries(state.history)) {
   if (typeof v === 'number') state.history[k] = { none: v };
@@ -220,6 +222,7 @@ function renderSubjectPicker() {
     chip.append(s.name);
     chip.addEventListener('click', () => {
       state.settings.subjectId = s.id === picked ? null : s.id; // click again to clear
+      state.settings.planId = null; // a new subject picks its plan automatically again
       save();
       renderSubjectPicker();
     });
@@ -236,6 +239,7 @@ function renderSubjectPicker() {
   $('subjectHint').hidden = hasSubjects;
   $('subjectHint').textContent = 'Optional. Add a subject to see how much time each one gets in your stats.';
   $('subjectPicker').title = picked ? 'Click the selected subject again to study without one' : '';
+  renderPlanPick(); // the plans of the subject picked here
   renderTodayPlan(); // its highlight follows the subject picked here
 }
 
@@ -277,6 +281,7 @@ function initSubjects() {
       state.subjects.push(s);
     }
     state.settings.subjectId = s.id;
+    state.settings.planId = null;
     save();
     $('subjectForm').classList.add('hidden');
     renderSubjectPicker();
@@ -380,7 +385,7 @@ function setAccent(type) {
 function startSession() {
   const blocks = buildPlan(state.settings);
   if (!blocks.length) return;
-  state.session = { blocks, index: 0, endsAt: Date.now() + blocks[0].min * 60000, pausedRemaining: null, startedAt: Date.now(), focusedMs: 0, subjectId: currentSubjectId() };
+  state.session = { blocks, index: 0, endsAt: Date.now() + blocks[0].min * 60000, pausedRemaining: null, startedAt: Date.now(), focusedMs: 0, subjectId: currentSubjectId(), planId: currentPlanId() };
   save();
   requestNotificationPermission();
   unlockAudio();
@@ -399,9 +404,14 @@ function creditFocus(elapsedMs) {
   const s = state.session;
   if (s.blocks[s.index].type !== 'focus' || elapsedMs <= 0) return;
   s.focusedMs = (s.focusedMs || 0) + elapsedMs;
-  const day = (state.history[dayKey(new Date())] ??= {});
+  const k = dayKey(new Date());
+  const day = (state.history[k] ??= {});
   const sid = s.subjectId || 'none';
   day[sid] = (day[sid] || 0) + elapsedMs;
+  if (s.planId) { // the session counts toward a plan in the Planner
+    const planDay = (state.planHistory[k] ??= {});
+    planDay[s.planId] = (planDay[s.planId] || 0) + elapsedMs;
+  }
 }
 
 function elapsedInBlock() {
@@ -463,10 +473,12 @@ function tick() {
 
   const pill = $('subjectPill');
   pill.hidden = !s.subjectId;
-  if (s.subjectId && pill.dataset.id !== s.subjectId) {
-    pill.dataset.id = s.subjectId;
+  const pillKey = `${s.subjectId}|${s.planId || ''}`;
+  if (s.subjectId && pill.dataset.id !== pillKey) {
+    pill.dataset.id = pillKey;
     pill.innerHTML = `<span class="dot" style="background:${subjectColor(s.subjectId)}"></span>`;
-    pill.append(subjectName(s.subjectId));
+    const plan = s.planId && planById(s.planId);
+    pill.append(subjectName(s.subjectId) + (plan ? ` · ${plan.name}` : '')); // the plan this session counts toward
   }
 
   const laterMs = s.blocks.slice(s.index + 1).reduce((a, b) => a + b.min * 60000, 0);
@@ -1598,8 +1610,9 @@ function initStats() {
 
 // ---------- Planner ----------
 
-// Plans for exams and projects. A plan's progress is the time studied with its subject, from the day the
-// plan was made until its deadline. So a subject can only have one active plan, or that time would count twice.
+// Plans for exams and projects. A subject can have several (an exam and a project, say). Each session counts
+// toward the plan picked under "Counts toward" on the start screen, or toward none, and a plan's progress is
+// only the sessions done for it (state.planHistory), so no study time ever counts twice.
 const planner = { month: null, selected: null, focus: null }; // what the Planner screen shows; not saved
 let planFormType = 'Exam', planFormSubject = null;
 
@@ -1616,9 +1629,25 @@ function monthGrid(year, month) {
   return Array.from({ length: weeks * 7 }, (_, i) => dayKey(addDays(first, i - offset)));
 }
 
-// The plan a subject's study time counts toward right now, if any.
-function activePlan(subjectId, plans = state.plans, today = todayKey()) {
-  return plans.find((p) => p.subjectId === subjectId && p.deadline >= today) || null;
+// A subject's plans that are still running (deadline today or later), soonest deadline first.
+function activePlans(subjectId, plans = state.plans, today = todayKey()) {
+  return plans.filter((p) => p.subjectId === subjectId && p.deadline >= today)
+    .sort((a, b) => a.deadline.localeCompare(b.deadline));
+}
+
+// The plan picked for you: the one with the most time planned for today, otherwise the soonest deadline.
+function defaultPlan(plans, planned = state.planned, today = todayKey()) {
+  const todays = planned[today] || {};
+  return [...plans].sort((a, b) => (todays[b.id] || 0) - (todays[a.id] || 0))[0] || null;
+}
+
+// The plan the next session counts toward: what you picked under "Counts toward" if it still fits the
+// subject, "No plan" (null) if you chose that, or the automatic pick.
+function currentPlanId() {
+  const plans = activePlans(currentSubjectId());
+  if (!plans.length || state.settings.planId === 'none') return null;
+  if (plans.some((p) => p.id === state.settings.planId)) return state.settings.planId;
+  return defaultPlan(plans).id;
 }
 function planById(id) { return state.plans.find((p) => p.id === id) || null; }
 
@@ -1654,13 +1683,12 @@ function copyDayToNext(k) {
   return next;
 }
 
-// Minutes studied toward a plan on a day: time with its subject, from the day the plan was made until its deadline.
-function planStudiedOn(plan, k, history = state.history) {
-  if (k < plan.created || k > plan.deadline) return 0;
-  return (history[k]?.[plan.subjectId] || 0) / 60000;
+// Minutes studied toward a plan on a day: the sessions that counted toward it.
+function planStudiedOn(plan, k, planHistory = state.planHistory) {
+  return (planHistory[k]?.[plan.id] || 0) / 60000;
 }
-function planStudied(plan, history = state.history) {
-  return Object.keys(history).reduce((a, k) => a + planStudiedOn(plan, k, history), 0);
+function planStudied(plan, planHistory = state.planHistory) {
+  return Object.keys(planHistory).reduce((a, k) => a + planStudiedOn(plan, k, planHistory), 0);
 }
 function planPlanned(plan, planned = state.planned) {
   return Object.values(planned).reduce((a, day) => a + (day[plan.id] || 0), 0);
@@ -1690,13 +1718,17 @@ function autoFillPlan(plan, planned = state.planned, today = todayKey()) {
   return added;
 }
 
-// Removes a plan and every hour planned for it.
+// Removes a plan, every hour planned for it and its own progress. The study time itself stays in your stats.
 function removePlan(id) {
   state.plans = state.plans.filter((p) => p.id !== id);
-  for (const [k, day] of Object.entries(state.planned)) {
-    delete day[id];
-    if (!Object.keys(day).length) delete state.planned[k];
+  for (const days of [state.planned, state.planHistory]) {
+    for (const [k, day] of Object.entries(days)) {
+      delete day[id];
+      if (!Object.keys(day).length) delete days[k];
+    }
   }
+  if (state.settings.planId === id) state.settings.planId = null;
+  if (state.session?.planId === id) state.session.planId = null; // the rest of the session counts toward no plan
   if (planner.focus === id) planner.focus = null;
 }
 
@@ -1844,7 +1876,7 @@ function renderTodayPlan() {
     const done = planStudiedOn(plan, today), color = subjectColor(plan.subjectId);
     const row = document.createElement('button');
     // Highlighted while the start screen is set to exactly this plan.
-    const picked = currentSubjectId() === plan.subjectId && total === min;
+    const picked = currentPlanId() === plan.id && total === min;
     row.className = 'tp-row' + (picked ? ' selected' : '');
     row.dataset.plan = plan.id;
     row.style.setProperty('--c', color);
@@ -1855,16 +1887,49 @@ function renderTodayPlan() {
   }
 }
 
-// Fills in the start screen for a plan: its time for today and its subject.
+// Fills in the start screen for a plan: its time for today, its subject, and the plan the session counts toward.
 function pickTodayPlan(id) {
   const item = todaysPlans().find((x) => x.plan.id === id);
   if (!item) return;
   $('hours').value = Math.floor(item.min / 60);
   $('minutes').value = item.min % 60;
   state.settings.subjectId = item.plan.subjectId;
+  state.settings.planId = item.plan.id;
   updatePreview(); // saves, and redraws this card
   renderSubjectPicker();
 }
+
+// ---- "Counts toward" on the start screen ----
+// Shown when the picked subject has plans: one of them is picked automatically, and you can change it or
+// pick "No plan" (then the session still counts in your stats, just not toward a plan).
+function renderPlanPick() {
+  const plans = activePlans(currentSubjectId());
+  $('planPick').hidden = !plans.length;
+  const el = $('planOptions');
+  el.innerHTML = '';
+  if (!plans.length) return;
+  const chosen = currentPlanId(), auto = state.settings.planId == null;
+  for (const p of [...plans, null]) {
+    const label = document.createElement('label');
+    label.className = 'check';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'planPick';
+    radio.value = p ? p.id : 'none';
+    radio.checked = (p ? p.id : null) === chosen;
+    const text = document.createElement('span');
+    text.className = 'pp-name';
+    text.textContent = p ? p.name : 'No plan';
+    const meta = document.createElement('span');
+    meta.className = 'tile-sub';
+    meta.textContent = p ? `${p.type} · due ${fmtDayShort(p.deadline)}${auto && p.id === chosen ? ' · picked for you' : ''}`
+      : 'counts in your stats only';
+    label.append(radio, text, meta);
+    el.appendChild(label);
+  }
+}
+
+// ---- New plan popup ----
 
 // ---- New plan popup ----
 function renderPlanFormChoices() {
@@ -1874,17 +1939,14 @@ function renderPlanFormChoices() {
   });
   const el = $('planSubjects'), subjects = state.subjects.filter((s) => !s.hidden);
   el.innerHTML = subjects.length ? ''
-    : '<span class="summary">Add a subject on the start screen first: a plan counts the time you study with its subject.</span>';
+    : '<span class="summary">Add a subject on the start screen first: every plan belongs to a subject.</span>';
   for (const s of subjects) {
-    const taken = activePlan(s.id);
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'chip' + (s.id === planFormSubject ? ' selected' : '');
     chip.dataset.subject = s.id;
     chip.style.setProperty('--chip-color', subjectColor(s.id));
     chip.setAttribute('aria-pressed', s.id === planFormSubject);
-    chip.disabled = !!taken;
-    if (taken) chip.title = `Already used by “${taken.name}”. One plan per subject, so study time is never counted twice.`;
     chip.innerHTML = `<span class="dot" style="background:${subjectColor(s.id)}"></span>`;
     chip.append(s.name);
     el.appendChild(chip);
@@ -1910,8 +1972,7 @@ function savePlanForm(e) {
   const name = $('planName').value.trim(), deadline = $('planDeadline').value;
   const hours = parseFloat($('planHours').value), today = todayKey();
   const error = !name ? 'Give the plan a name.'
-    : !planFormSubject ? 'Pick a subject, so the time you study counts toward this plan.'
-    : activePlan(planFormSubject) ? 'That subject already has a plan.'
+    : !planFormSubject ? 'Pick the subject this plan is for.'
     : !/^\d{4}-\d{2}-\d{2}$/.test(deadline) || deadline < today ? 'The deadline can’t be before today.'
     : !(hours > 0 && hours <= 500) ? 'Hours needed must be more than 0 and at most 500.'
     : '';
@@ -1928,6 +1989,13 @@ function savePlanForm(e) {
 
 function initPlanner() {
   $('planBtn').addEventListener('click', () => show('planner'));
+  $('planOptions').addEventListener('change', (e) => {
+    if (e.target.name !== 'planPick') return;
+    state.settings.planId = e.target.value; // a plan id, or 'none'
+    save();
+    renderPlanPick();
+    renderTodayPlan();
+  });
   $('todayPlanList').addEventListener('click', (e) => {
     const row = e.target.closest('[data-plan]');
     if (row) pickTodayPlan(row.dataset.plan);
@@ -2083,6 +2151,7 @@ function initSettings() {
     });
     if (!reset) return;
     state.history = {};
+    state.planHistory = {}; // plans and planned hours stay; the time studied for them starts again
     state.sessionCount = 0;
     state.sessionLog = [];
     state.achievements = {};

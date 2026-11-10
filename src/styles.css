@@ -509,6 +509,12 @@ body.paused .time { opacity: .5; }
 .d-foot .sum { color: var(--muted); font-size: .9rem; }
 .d-foot .sum b { color: var(--text); }
 .d-foot .btns { display: flex; gap: 8px; }
+/* "Counts toward" on the start screen: which plan the session is for */
+.plan-pick { margin-top: 12px; }
+.plan-pick[hidden] { display: none; }
+.plan-options { display: flex; flex-direction: column; gap: 2px; }
+.plan-options label.check { margin-top: 4px; flex-wrap: wrap; }
+.plan-options .pp-name { font-weight: 600; }
 /* "Today's plan" card on the start screen */
 .today-plan { display: flex; flex-direction: column; gap: 8px; }
 .tp-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; }

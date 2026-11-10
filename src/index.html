@@ -86,6 +86,11 @@
           <button type="button" id="subjectCancel">Cancel</button>
         </form>
         <p class="summary" id="subjectHint"></p>
+        <!-- Which plan this session counts toward; only when the picked subject has plans -->
+        <div class="plan-pick" id="planPick" hidden>
+          <span class="field-label">Counts toward</span>
+          <div class="plan-options" id="planOptions" role="radiogroup" aria-label="Plan this session counts toward"></div>
+        </div>
         </div>
       </div>
 

@@ -39,10 +39,17 @@ describe('planner data', () => {
     expect(grid.at(-1)).toBe('2026-11-01'); // the Sunday after 31 Oct
   });
 
-  it('finds the active plan of a subject, and ignores plans past their deadline', () => {
-    app = loadApp({ saved: saved({ plans: [plan({ id: 'old', deadline: day(-1) }), plan()] }) });
-    expect(app.run(`activePlan('s1').id`)).toBe('p1');
-    expect(app.run(`activePlan('s2')`)).toBeNull();
+  it("lists a subject's running plans, soonest deadline first, and skips plans past their deadline", () => {
+    app = loadApp({ saved: saved({ plans: [plan({ id: 'old', deadline: day(-1) }), plan({ id: 'late', deadline: day(20) }), plan()] }) });
+    expect(app.run(`activePlans('s1').map((p) => p.id)`)).toEqual(['p1', 'late']);
+    expect(app.run(`activePlans('s2')`)).toEqual([]);
+  });
+
+  it("picks the plan with the most time planned today, otherwise the soonest deadline", () => {
+    app = loadApp({ saved: saved({ plans: [plan(), plan({ id: 'late', deadline: day(20) })] }) });
+    expect(app.run(`defaultPlan(activePlans('s1')).id`)).toBe('p1');
+    app.run(`state.planned['${day(0)}'] = { late: 30 }`);
+    expect(app.run(`defaultPlan(activePlans('s1')).id`)).toBe('late');
   });
 });
 
@@ -107,7 +114,7 @@ describe('new plan popup', () => {
     expect(app.$('planError').textContent).toBe('Give the plan a name.');
     app.$('planName').value = 'Exam';
     submit(app.$('planForm'));
-    expect(app.$('planError').textContent).toContain('Pick a subject');
+    expect(app.$('planError').textContent).toBe('Pick the subject this plan is for.');
     app.$('planSubjects').querySelector('[data-subject="s1"]').click();
     app.$('planDeadline').value = day(-1);
     submit(app.$('planForm'));
@@ -120,17 +127,15 @@ describe('new plan popup', () => {
     expect(app.$('planDialog').open).toBe(true);
   });
 
-  it('allows one active plan per subject, so study time never counts twice', () => {
+  it('lets a subject have an exam and a project at the same time', () => {
     openPlanner(saved({ plans: [plan()] }));
     app.$('newPlanBtn').click();
-    expect(app.$('planSubjects').querySelector('[data-subject="s1"]').disabled).toBe(true);
-    expect(app.$('planSubjects').querySelector('[data-subject="s2"]').disabled).toBe(false);
-  });
-
-  it('frees the subject again once the old plan is past its deadline', () => {
-    openPlanner(saved({ plans: [plan({ deadline: day(-1) })] }));
-    app.$('newPlanBtn').click();
-    expect(app.$('planSubjects').querySelector('[data-subject="s1"]').disabled).toBe(false);
+    app.$('planName').value = 'Maths project';
+    app.$('planType').querySelector('[data-type="Project"]').click();
+    app.$('planSubjects').querySelector('[data-subject="s1"]').click();
+    submit(app.$('planForm'));
+    expect(app.$('planError').textContent).toBe('');
+    expect(app.saved().plans.map((p) => [p.type, p.subjectId])).toEqual([['Exam', 's1'], ['Project', 's1']]);
   });
 
   it('asks for a subject first when there are none', () => {
@@ -229,18 +234,18 @@ describe('hours per day', () => {
 
 describe('progress', () => {
   const dayCell = (k) => app.$('calendar').querySelector(`[data-day="${k}"]`);
-  // p1 runs from day(-5) to day(10) for Maths (s1)
-  const history = {
-    [day(-9)]: { s1: 120 * MIN },              // before the plan was made: doesn't count
-    [day(-2)]: { s1: 45 * MIN, s2: 30 * MIN }, // only the Maths part counts
-    [day(0)]: { s1: 20 * MIN },
+  // Sessions done for each plan. p1 (exam) and p3 (project) are both Maths: each only gets its own sessions.
+  const planHistory = {
+    [day(-2)]: { p1: 45 * MIN, p3: 30 * MIN },
+    [day(0)]: { p1: 20 * MIN },
   };
+  const history = { [day(-2)]: { s1: 75 * MIN }, [day(0)]: { s1: 50 * MIN } }; // more Maths than the plans got
 
-  it('counts the time studied with the plan subject, from the day it was made to its deadline', () => {
-    app = loadApp({ saved: saved({ plans: [plan()], history }) });
+  it('counts only the sessions done for that plan', () => {
+    app = loadApp({ saved: saved({ plans: [plan(), plan({ id: 'p3', type: 'Project' })], history, planHistory }) });
     expect(app.run(`planStudied(planById('p1'))`)).toBe(65);
-    expect(app.run(`planStudiedOn(planById('p1'), '${day(-9)}')`)).toBe(0);
-    expect(app.run(`planStudied({ ...planById('p1'), deadline: '${day(-1)}' })`)).toBe(45); // after the deadline doesn't count
+    expect(app.run(`planStudied(planById('p3'))`)).toBe(30);
+    expect(app.run(`planStudiedOn(planById('p1'), '${day(-1)}')`)).toBe(0);
   });
 
   it('adds up the hours planned for a plan', () => {
@@ -249,7 +254,7 @@ describe('progress', () => {
   });
 
   it('shows studied, needed and planned hours, and warns when the plan is short', () => {
-    openPlanner(saved({ plans: [plan()], history, planned: { [day(1)]: { p1: 120 } } }));
+    openPlanner(saved({ plans: [plan()], planHistory, planned: { [day(1)]: { p1: 120 } } }));
     const card = app.$('planList').querySelector('[data-plan="p1"]');
     expect(card.querySelector('.pl-num').textContent).toBe('1h 5m studied of 10h · 2h planned');
     expect(card.querySelector('.meter-fill').style.width).toBe(`${(65 / 600) * 100}%`);
@@ -258,18 +263,18 @@ describe('progress', () => {
 
   it('says when a plan is fully planned, done, or past its deadline', () => {
     const planned = { [day(1)]: { p1: 600 } };
-    openPlanner(saved({ plans: [plan()], history, planned }));
+    openPlanner(saved({ plans: [plan()], planHistory, planned }));
     expect(app.$('planList').querySelector('.pl-stat').textContent).toBe('✓ Fully planned');
     app.close();
-    openPlanner(saved({ plans: [plan({ needMin: 60 })], history }));
+    openPlanner(saved({ plans: [plan({ needMin: 60 })], planHistory }));
     expect(app.$('planList').querySelector('.pl-stat').textContent).toContain('Done');
     app.close();
-    openPlanner(saved({ plans: [plan({ deadline: day(-1) })], history }));
-    expect(app.$('planList').querySelector('.pl-stat').textContent).toBe('Deadline passed with 9h 15m left');
+    openPlanner(saved({ plans: [plan({ deadline: day(-1) })], planHistory }));
+    expect(app.$('planList').querySelector('.pl-stat').textContent).toBe('Deadline passed with 8h 55m left');
   });
 
   it('shows studied / planned on past days and today, and marks days that fell short', () => {
-    openPlanner(saved({ plans: [plan()], history, planned: { [day(-2)]: { p1: 60 }, [day(-1)]: { p1: 30 }, [day(0)]: { p1: 15 }, [day(1)]: { p1: 45 } } }));
+    openPlanner(saved({ plans: [plan()], planHistory, planned: { [day(-2)]: { p1: 60 }, [day(-1)]: { p1: 30 }, [day(0)]: { p1: 15 }, [day(1)]: { p1: 45 } } }));
     expect(dayCell(day(-2)).querySelector('.tot').textContent).toBe('45m / 1h');
     expect(dayCell(day(-2)).querySelector('.tot').classList.contains('short')).toBe(true);
     expect(dayCell(day(-1)).querySelector('.tot').textContent).toBe('0m / 30m');
@@ -279,7 +284,7 @@ describe('progress', () => {
   });
 
   it('shows what was studied for each plan in the day panel', () => {
-    openPlanner(saved({ plans: [plan()], history, planned: { [day(-2)]: { p1: 60 } } }));
+    openPlanner(saved({ plans: [plan()], planHistory, planned: { [day(-2)]: { p1: 60 } } }));
     click(dayCell(day(-2)));
     expect(app.$('dayPanel').querySelector('.st').textContent).toBe('45m studied');
     expect(app.$('dayPanel').querySelector('.sum').textContent).toBe('Planned 1h · Studied 45m');
@@ -295,7 +300,7 @@ describe("today's plan on the start screen", () => {
   });
 
   it("lists today's plans with their time and what's done", () => {
-    app = loadApp({ saved: saved({ ...today(), history: { [day(0)]: { s1: 25 * MIN } } }) });
+    app = loadApp({ saved: saved({ ...today(), history: { [day(0)]: { s1: 25 * MIN } }, planHistory: { [day(0)]: { p1: 25 * MIN } } }) });
     expect(app.$('todayPlanCard').hidden).toBe(false);
     const rows = [...app.$('todayPlanList').querySelectorAll('.tp-row')].map((r) => r.textContent);
     expect(rows).toEqual(['Calculus exam1 h 30 min25m done', 'Lab report45 minnot started']);
@@ -328,6 +333,110 @@ describe("today's plan on the start screen", () => {
   it('leaves out plans whose subject is hidden', () => {
     app = loadApp({ saved: saved({ ...today(), subjects: [SUBJECTS[0], { ...SUBJECTS[1], hidden: true }] }) });
     expect([...app.$('todayPlanList').querySelectorAll('[data-plan]')].map((r) => r.dataset.plan)).toEqual(['p1']);
+  });
+});
+
+describe('counts toward a plan', () => {
+  // Maths (s1) has an exam (p1, due day 10) and a project (p3, due day 20); Physics (s2) has no plan.
+  const twoPlans = (extra = {}) => saved({
+    plans: [plan(), plan({ id: 'p3', name: 'Maths project', type: 'Project', deadline: day(20) })],
+    settings: { ...BASE_SETTINGS, subjectId: 's1' }, ...extra,
+  });
+  const choices = () => [...app.$('planOptions').querySelectorAll('input')].map((r) => `${r.value}${r.checked ? '*' : ''}`);
+  const pick = (value) => {
+    const radio = app.$('planOptions').querySelector(`input[value="${value}"]`);
+    radio.checked = true;
+    radio.dispatchEvent(new app.window.Event('change', { bubbles: true }));
+  };
+  // Studies 10 minutes and ends the session early.
+  async function studyTenMinutes() {
+    app.$('startBtn').click();
+    app.advance(10 * MIN);
+    app.$('endBtn').click();
+    app.$('confirmYes').click();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  it("shows the subject's plans and No plan, with one picked for you", () => {
+    app = loadApp({ saved: twoPlans() });
+    expect(app.$('planPick').hidden).toBe(false);
+    expect(choices()).toEqual(['p1*', 'p3', 'none']);
+    expect(app.$('planOptions').textContent).toContain('Exam · due 7 Nov · picked for you');
+  });
+
+  it('is hidden when the subject has no plans, or no subject is picked', () => {
+    app = loadApp({ saved: twoPlans({ settings: { ...BASE_SETTINGS, subjectId: 's2' } }) });
+    expect(app.$('planPick').hidden).toBe(true);
+    app.close();
+    app = loadApp({ saved: twoPlans({ settings: { ...BASE_SETTINGS, subjectId: null } }) });
+    expect(app.$('planPick').hidden).toBe(true);
+  });
+
+  it('remembers what you pick, including No plan', () => {
+    app = loadApp({ saved: twoPlans() });
+    pick('p3');
+    expect(app.saved().settings.planId).toBe('p3');
+    expect(choices()).toEqual(['p1', 'p3*', 'none']);
+    pick('none');
+    expect(app.saved().settings.planId).toBe('none');
+    expect(choices()).toEqual(['p1', 'p3', 'none*']);
+  });
+
+  it('a session counts toward the picked plan only', async () => {
+    app = loadApp({ saved: twoPlans() });
+    pick('p3');
+    await studyTenMinutes();
+    expect(app.saved().planHistory).toEqual({ [day(0)]: { p3: 10 * MIN } });
+    expect(app.saved().history[day(0)]).toEqual({ s1: 10 * MIN }); // and in your stats, as always
+  });
+
+  it('with No plan, the session counts in your stats but toward no plan', async () => {
+    app = loadApp({ saved: twoPlans() });
+    pick('none');
+    await studyTenMinutes();
+    expect(app.saved().planHistory).toEqual({});
+    expect(app.saved().history[day(0)]).toEqual({ s1: 10 * MIN });
+  });
+
+  it('shows the plan next to the subject on the timer', () => {
+    app = loadApp({ saved: twoPlans() });
+    app.$('startBtn').click();
+    expect(app.$('subjectPill').textContent).toBe('Maths · Calculus exam');
+  });
+
+  it('picks automatically again when you choose another subject', () => {
+    app = loadApp({ saved: twoPlans({ settings: { ...BASE_SETTINGS, subjectId: 's1', planId: 'none' } }) });
+    const chip = (name) => [...app.$('subjectPicker').querySelectorAll('.chip')].find((c) => c.textContent === name);
+    chip('Physics').click();
+    chip('Maths').click();
+    expect(app.state.settings.planId).toBeNull();
+    expect(choices()).toEqual(['p1*', 'p3', 'none']);
+  });
+
+  it("picking a row in Today's plan picks its plan too", () => {
+    app = loadApp({ saved: twoPlans({ planned: { [day(0)]: { p3: 45 } } }) });
+    app.$('todayPlanList').querySelector('[data-plan="p3"]').click();
+    expect(app.saved().settings.planId).toBe('p3');
+    expect(choices()).toEqual(['p1', 'p3*', 'none']);
+  });
+
+  it('deleting the picked plan goes back to picking automatically', () => {
+    app = loadApp({ saved: twoPlans({ settings: { ...BASE_SETTINGS, subjectId: 's1', planId: 'p3' }, planHistory: { [day(-1)]: { p3: 5 * MIN, p1: 5 * MIN } } }) });
+    app.run(`removePlan('p3')`);
+    expect(app.state.settings.planId).toBeNull();
+    expect(JSON.parse(JSON.stringify(app.state.planHistory))).toEqual({ [day(-1)]: { p1: 5 * MIN } });
+  });
+
+  it('Reset stats also resets what was studied for each plan, and keeps the plans', async () => {
+    app = loadApp({ saved: twoPlans({ planHistory: { [day(-1)]: { p1: 5 * MIN } }, planned: { [day(1)]: { p1: 60 } } }) });
+    app.$('resetStatsBtn').click();
+    app.$('confirmYes').click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(app.saved().planHistory).toEqual({});
+    expect(app.saved().plans).toHaveLength(2);
+    expect(app.saved().planned).toEqual({ [day(1)]: { p1: 60 } });
   });
 });
 
