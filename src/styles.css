@@ -481,6 +481,7 @@ body.paused .time { opacity: .5; }
   font-size: .7rem; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden;
 }
 .pill.faded { opacity: .25; }
+.pill.pinned { font-weight: 700; } /* a day you set yourself */
 .cell .tot { margin-top: auto; font-size: .68rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .cell .tot.short { color: var(--warn); font-weight: 600; }
 @media (max-width: 520px) {
@@ -502,6 +503,9 @@ body.paused .time { opacity: .5; }
   font-weight: 700; font-variant-numeric: tabular-nums; cursor: text;
 }
 .stepper .d-time-btn:hover { border-color: var(--border); }
+.d-pin { padding: 2px 6px; background: transparent; border-color: transparent; font-size: .9rem; }
+.d-pin:hover { border-color: var(--border); }
+.d-auto { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; min-width: 30px; text-align: center; }
 .d-time-input { width: 72px; padding: 5px 6px; text-align: center; font-variant-numeric: tabular-nums; }
 .d-time-input.bad { outline: 2px solid var(--danger); }
 .d-row .st { min-width: 90px; text-align: right; color: var(--muted); font-size: .82rem; }

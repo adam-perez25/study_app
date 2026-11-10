@@ -304,9 +304,10 @@ describe('progress', () => {
   it('shows studied, needed and planned hours, and warns when the plan is short', () => {
     openPlanner(saved({ plans: [plan()], planHistory, planned: { [day(1)]: { p1: 120 } } }));
     const card = app.$('planList').querySelector('[data-plan="p1"]');
-    expect(card.querySelector('.pl-num').textContent).toBe('1h 5m studied of 10h · 2h planned');
+    expect(card.querySelector('.pl-num').textContent).toBe('1h 5m studied of 10h · 2h planned ahead');
     expect(card.querySelector('.meter-fill').style.width).toBe(`${(65 / 600) * 100}%`);
-    expect(card.querySelector('.pl-stat').textContent).toBe('⚠ 8h still unplanned');
+    // 10 h needed − 45 min studied before today − 2 h planned ahead (today's 20 min is part of today's plan)
+    expect(card.querySelector('.pl-stat').textContent).toBe('⚠ 7h 15m still unplanned');
   });
 
   it('says when a plan is fully planned, done, or past its deadline', () => {
@@ -488,62 +489,128 @@ describe('counts toward a plan', () => {
   });
 });
 
-describe('auto-fill', () => {
-  // Today is Wed 28 Oct; p1 is due Sat 7 Nov, so its weekdays are 28, 29, 30 Oct and 2–6 Nov (8 days).
-  const weekdays = [0, 1, 2, 5, 6, 7, 8, 9].map(day);
+describe('keeping plans balanced', () => {
+  // Today is Wed 28 Oct; p1 (10 h, due Sat 7 Nov) has 8 weekdays left: 28, 29, 30 Oct and 2–6 Nov.
+  const weekdays = [0, 1, 2, 5, 6, 7, 8, 9];
+  const auto = (extra = {}) => plan({ auto: true, ...extra });
+  const minutes = (ns) => ns.map((n) => app.state.planned[day(n)]?.p1 ?? 0);
+  const ahead = () => app.run(`plannedFrom(planById('p1'))`);
 
-  it('spreads the missing hours evenly over the weekdays before the deadline', () => {
-    app = loadApp({ saved: saved({ plans: [plan()] }) });
-    expect(app.run(`autoFillPlan(planById('p1'))`)).toBe(600);
-    expect(Object.keys(app.state.planned).sort()).toEqual(weekdays);
-    expect(Object.values(app.state.planned).map((d) => d.p1)).toEqual(Array(8).fill(75));
+  it('spreads the hours evenly over the weekdays left before the deadline', () => {
+    app = loadApp({ saved: saved({ plans: [auto()] }) }); // opening the app balances it
+    expect(minutes(weekdays)).toEqual(Array(8).fill(75));
+    expect(app.state.planned[day(3)]).toBeUndefined(); // no weekends
+    expect(app.saved().planned[day(0)].p1).toBe(75);   // and it was saved
   });
 
-  it('only adds what is missing, on days the plan has nothing yet', () => {
+  it('leaves plans you plan by hand alone', () => {
     app = loadApp({ saved: saved({ plans: [plan()], planned: { [day(1)]: { p1: 60 } } }) });
-    expect(app.run(`autoFillPlan(planById('p1'))`)).toBe(540);
-    expect(app.state.planned[day(1)].p1).toBe(60); // left as it was
-    expect(app.run(`planPlanned(planById('p1'))`)).toBe(600);
-    // 540 min over the 7 other weekdays: 75 min each, plus one extra 15 min on the first day
-    expect([0, 2, 5, 6, 7, 8, 9].map((n) => app.state.planned[day(n)].p1)).toEqual([90, 75, 75, 75, 75, 75, 75]);
+    expect(app.run(`rebalancePlan(planById('p1'))`)).toBe(false);
+    expect(JSON.parse(JSON.stringify(app.state.planned))).toEqual({ [day(1)]: { p1: 60 } });
   });
 
-  it('never plans more than 12 h on a day, and leaves the rest unplanned', () => {
-    app = loadApp({ saved: saved({ plans: [plan({ needMin: 6000, deadline: day(2) })] }) });
-    expect(app.run(`autoFillPlan(planById('p1'))`)).toBe(3 * 720);
+  it('puts less on one day: that day is pinned and the other days get more', () => {
+    app = loadApp({ saved: saved({ plans: [auto()] }) });
+    app.run(`setByHand('${day(1)}', 'p1', 30)`);
+    expect(app.run(`isPinned(planById('p1'), '${day(1)}')`)).toBe(true);
+    // 570 min left over the 7 other days: 75 each, plus 15 more on the first three
+    expect(minutes(weekdays)).toEqual([90, 30, 90, 90, 75, 75, 75, 75]);
+    expect(ahead()).toBe(600);
   });
 
-  it('does nothing for a plan that is already fully planned', () => {
-    app = loadApp({ saved: saved({ plans: [plan({ needMin: 60 })], planned: { [day(1)]: { p1: 60 } } }) });
-    expect(app.run(`autoFillPlan(planById('p1'))`)).toBe(0);
+  it('puts more on one day: the other days get less', () => {
+    app = loadApp({ saved: saved({ plans: [auto()] }) });
+    app.run(`setByHand('${day(1)}', 'p1', 180)`);
+    expect(minutes(weekdays)).toEqual([60, 180, 60, 60, 60, 60, 60, 60]);
+    expect(ahead()).toBe(600);
   });
 
-  it('fills a new plan right away when the box is ticked, and not when it is unticked', () => {
-    const create = (autoFill) => {
+  it('a cleared day stays free, and unpinning it lets it adjust again', () => {
+    openPlanner(saved({ plans: [auto()] }));
+    click(app.$('calendar').querySelector(`[data-day="${day(1)}"]`));
+    app.$('clearDayBtn').click();
+    expect(minutes([1])).toEqual([0]);
+    expect(ahead()).toBe(600); // the other 7 days took its time
+    const pin = app.$('dayPanel').querySelector('[data-unpin="p1"]'); // still listed, pinned at 0
+    expect(pin.textContent).toBe('📌');
+    pin.click();
+    expect(minutes(weekdays)).toEqual(Array(8).fill(75));
+  });
+
+  it('marks pinned days with 📌 and the others with auto', () => {
+    openPlanner(saved({ plans: [auto()] }));
+    expect(app.$('dayPanel').querySelector('.d-auto').textContent).toBe('auto');
+    app.$('dayPanel').querySelector('[data-step="15"]').click();
+    expect(app.$('dayPanel').querySelector('[data-unpin="p1"]')).not.toBeNull();
+    expect(app.$('calendar').querySelector(`[data-day="${day(0)}"] .pill`).classList.contains('pinned')).toBe(true);
+  });
+
+  it('moves time you studied less than planned to the days left', () => {
+    app = loadApp({ saved: saved({ plans: [auto()] }) });
+    expect(minutes([0])).toEqual([75]);
+    app.setNow(app.now() + 24 * 3600000); // a day goes by and nothing was studied
+    app.run('rebalanceAll()');
+    // the whole 10 h is now shared over the 7 weekdays left
+    expect(minutes([1, 2, 5, 6, 7, 8, 9])).toEqual([90, 90, 90, 90, 90, 75, 75]);
+    expect(app.run(`plannedFrom(planById('p1'), '${day(1)}')`)).toBe(600);
+  });
+
+  it('counts what you studied before today', () => {
+    app = loadApp({ saved: saved({ plans: [auto()], planHistory: { [day(-1)]: { p1: 60 * MIN } } }) });
+    expect(ahead()).toBe(540); // 10 h − 1 h already studied
+  });
+
+  it('never plans more than 12 h a day, and warns about what does not fit', () => {
+    openPlanner(saved({ plans: [auto({ needMin: 6000, deadline: day(2) })] }));
+    expect(minutes([0, 1, 2])).toEqual([720, 720, 720]);
+    expect(app.$('planList').querySelector('.pl-stat').textContent).toBe('⚠ 64h still unplanned');
+  });
+
+  it('copying a day pins both days', () => {
+    openPlanner(saved({ plans: [auto()] }));
+    app.$('dayPanel').querySelector('[data-step="15"]').click(); // today: 90, pinned
+    app.$('copyDayBtn').click();
+    expect(minutes([0, 1])).toEqual([90, 90]);
+    expect(app.run(`planById('p1').pinned.sort()`)).toEqual([day(0), day(1)]);
+    expect(ahead()).toBe(600);
+  });
+
+  it('a new plan is balanced right away when the box is ticked, and not when it is unticked', () => {
+    const create = (ticked) => {
       openPlanner(saved());
       app.$('newPlanBtn').click();
       app.$('planName').value = 'Exam';
       app.$('planSubjects').querySelector('[data-subject="s1"]').click();
       app.$('planDeadline').value = day(10);
       app.$('planHours').value = '10';
-      app.$('planAutoFill').checked = autoFill;
+      app.$('planAutoFill').checked = ticked;
       submit(app.$('planForm'));
-      return app.saved().planned;
+      return app.saved();
     };
-    expect(Object.keys(create(true)).sort()).toEqual(weekdays);
+    let data = create(true);
+    expect(data.plans[0].auto).toBe(true);
+    expect(Object.keys(data.planned).sort()).toEqual(weekdays.map(day));
     app.close();
-    expect(create(false)).toEqual({});
+    data = create(false);
+    expect(data.plans[0].auto).toBeFalsy();
+    expect(data.planned).toEqual({});
   });
 
-  it('fills every short plan from the Planner and says how much it added', () => {
-    openPlanner(saved({ plans: [plan(), plan({ id: 'p2', subjectId: 's2', needMin: 60, deadline: day(2) }), plan({ id: 'old', subjectId: 's2', deadline: day(-1) })] }));
-    expect(app.$('autoFillBtn').disabled).toBe(false);
+  it('the button spreads the missing hours of every plan and keeps them balanced', () => {
+    openPlanner(saved({ plans: [plan(), plan({ id: 'old', subjectId: 's2', deadline: day(-1) })], planned: { [day(1)]: { p1: 600 } } }));
+    expect(app.$('autoFillBtn').disabled).toBe(false); // p1 is planned by hand
     app.$('autoFillBtn').click();
-    expect(app.$('autoFillStatus').textContent).toBe('Added 11h to 2 plans. Change any day with − / +.');
-    // p2: 60 min over Wed–Fri is 30 + 15 + 15
-    expect([0, 1, 2].map((n) => app.saved().planned[day(n)].p2)).toEqual([30, 15, 15]);
-    expect(app.saved().planned[day(0)].p1).toBe(75);
-    expect(app.$('autoFillBtn').disabled).toBe(true); // nothing left to fill
+    expect(app.state.plans[0].auto).toBe(true);
+    expect(app.state.plans[1].auto).toBeFalsy(); // past its deadline
+    expect(ahead()).toBe(600);
+    expect(app.$('autoFillStatus').textContent).toContain('Done');
+    expect(app.$('autoFillBtn').disabled).toBe(true); // nothing left to spread
+  });
+
+  it('the button says when a plan does not fit in the days left', () => {
+    openPlanner(saved({ plans: [plan({ needMin: 6000, deadline: day(2) })] }));
+    app.$('autoFillBtn').click();
+    expect(app.$('autoFillStatus').textContent).toContain('1 plan doesn’t fit in the days left');
   });
 });
 

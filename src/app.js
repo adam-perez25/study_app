@@ -27,7 +27,8 @@ state.settings.sound.chime ??= 'bells';
 state.settings.sound.volume ??= 0.7;
 state.settings.sound.muted ??= false;
 state.settings.noBreaks ??= false; // on: the whole session is one focus block, with no breaks
-state.plans ??= [];   // { id, name, type: 'Exam' | 'Project', subjectId, created, deadline: 'YYYY-MM-DD', needMin }
+state.plans ??= [];   // { id, name, type: 'Exam' | 'Project', subjectId, created, deadline: 'YYYY-MM-DD', needMin, auto?, pinned? }
+                      // auto: kept balanced (rebalancePlan); pinned: the days you set yourself
 state.planned ??= {}; // { 'YYYY-MM-DD': { planId: minutes planned that day } }
 state.planHistory ??= {}; // { 'YYYY-MM-DD': { planId: focused ms } }: the sessions you did for each plan
 state.settings.planId ??= null; // plan the next session counts toward: a plan id, 'none', or null to pick one automatically
@@ -374,7 +375,7 @@ function show(screen) {
   if (screen === 'setup') { renderTodayCard(); renderSubjectPicker(); }
   if (screen === 'stats') renderStats();
   if (screen === 'settings') { renderSettings(); renderSound(); }
-  if (screen === 'planner') renderPlanner();
+  if (screen === 'planner') { rebalanceAll(); renderPlanner(); }
   window.scrollTo(0, 0);
 }
 
@@ -1658,11 +1659,11 @@ function fmtHM(min) {
   return h && m ? `${h}:${pad(m)}` : h ? `${h}h` : `${m}m`;
 }
 
-// The plans planned on a day, with their minutes (plans that no longer exist are skipped).
+// The plans planned on a day, with their minutes, in the order of the plans list (plans that no longer exist
+// are skipped). The same order every day, so the calendar's pills line up.
 function plannedOn(k) {
-  return Object.entries(state.planned[k] || {})
-    .filter(([id, min]) => min > 0 && planById(id))
-    .map(([id, min]) => ({ plan: planById(id), min }));
+  const day = state.planned[k] || {};
+  return state.plans.filter((p) => day[p.id] > 0).map((plan) => ({ plan, min: day[plan.id] }));
 }
 
 // Sets the minutes of a plan on a day, from 0 to 12 h (typed exactly; − / + move it 15 minutes).
@@ -1686,11 +1687,19 @@ function parseDuration(text) {
 }
 
 // Makes the next day the same as this one (plans already past their deadline by then are left out).
+// Both days count as set by hand, so they're pinned before the plans rebalance.
 function copyDayToNext(k) {
-  const next = keyAdd(k, 1), copy = {};
-  for (const { plan, min } of plannedOn(k)) if (plan.deadline >= next) copy[plan.id] = min;
-  if (Object.keys(copy).length) state.planned[next] = copy;
-  else delete state.planned[next];
+  const next = keyAdd(k, 1), today = todayKey(), plans = [];
+  const ids = new Set([...Object.keys(state.planned[k] || {}), ...Object.keys(state.planned[next] || {})]);
+  for (const id of ids) {
+    const plan = planById(id);
+    if (!plan) continue;
+    setPlanned(next, id, plan.deadline >= next ? state.planned[k]?.[id] || 0 : 0);
+    pinDay(plan, next);
+    if (k >= today) pinDay(plan, k);
+    plans.push(plan);
+  }
+  for (const p of plans) rebalancePlan(p);
   return next;
 }
 
@@ -1708,25 +1717,66 @@ function planPlanned(plan, planned = state.planned) {
 // Spreads a plan's unplanned minutes over the free weekdays from today (or the day it was made) to its
 // deadline, evenly and in 15-minute steps. A weekday is free when this plan has nothing on it yet; other
 // plans can share the day. Returns the minutes added; whatever doesn't fit (12 h a day at most) stays unplanned.
-function autoFillPlan(plan, planned = state.planned, today = todayKey()) {
-  let left = plan.needMin - planPlanned(plan, planned);
-  if (left <= 0) return 0;
+function isPinned(plan, k) { return (plan.pinned || []).includes(k); }
+function pinDay(plan, k) { if (plan.auto && !isPinned(plan, k)) (plan.pinned ??= []).push(k); }
+function unpinDay(plan, k) { plan.pinned = (plan.pinned || []).filter((d) => d !== k); }
+
+// What you studied for a plan before today, and what's planned for it from today on.
+function studiedBefore(plan, today = todayKey(), planHistory = state.planHistory) {
+  return Object.keys(planHistory).filter((k) => k < today).reduce((a, k) => a + planStudiedOn(plan, k, planHistory), 0);
+}
+function plannedFrom(plan, today = todayKey(), planned = state.planned) {
+  return Object.entries(planned).filter(([k]) => k >= today).reduce((a, [, day]) => a + (day[plan.id] || 0), 0);
+}
+// The time a plan still needs that isn't planned on today or a later day (below 0: more than it needs).
+function planMissing(plan, today = todayKey()) {
+  return plan.needMin - studiedBefore(plan, today) - plannedFrom(plan, today);
+}
+
+// Keeps a plan balanced (only plans with auto: true). The days you set yourself are pinned and keep their time;
+// the other weekdays from today to the deadline share what's still needed (hours needed minus what you studied
+// before today, minus the pinned days), evenly in 15-minute pieces and at most 12 h a day. So putting more on
+// one day leaves less for the others, and a day you skip or cut short moves to the days left.
+// Returns true if any day changed.
+function rebalancePlan(plan, today = todayKey(), planned = state.planned, planHistory = state.planHistory) {
+  if (!plan.auto || plan.deadline < today) return false;
+  const snapshot = () => JSON.stringify(Object.keys(planned).filter((k) => k >= today && planned[k][plan.id])
+    .sort().map((k) => [k, planned[k][plan.id]]));
+  const before = snapshot();
+  let left = plan.needMin - studiedBefore(plan, today, planHistory);
+  for (const [k, day] of Object.entries(planned)) {
+    if (k < today || !(plan.id in day)) continue;
+    if (isPinned(plan, k)) left -= day[plan.id];
+    else { delete day[plan.id]; if (!Object.keys(day).length) delete planned[k]; } // worked out again below
+  }
   const days = [];
   for (let k = today > plan.created ? today : plan.created; k <= plan.deadline; k = keyAdd(k, 1)) {
-    const weekday = (parseKey(k).getDay() + 6) % 7;
-    if (weekday < 5 && !planned[k]?.[plan.id]) days.push(k);
+    if ((parseKey(k).getDay() + 6) % 7 < 5 && !isPinned(plan, k)) days.push(k);
   }
-  if (!days.length) return 0;
-  // Share out 15-minute pieces: every day gets the same, and the first days get one more if it doesn't divide.
-  const pieces = Math.ceil(left / 15), each = Math.floor(pieces / days.length), extra = pieces % days.length;
-  let added = 0;
-  days.forEach((k, i) => {
-    const min = Math.min(720, (each + (i < extra ? 1 : 0)) * 15);
-    if (!min) return;
-    (planned[k] ??= {})[plan.id] = min;
-    added += min;
-  });
-  return added;
+  if (left > 0 && days.length) {
+    // Every day gets the same number of 15-minute pieces; the first days get one more if it doesn't divide.
+    const pieces = Math.ceil(left / 15), each = Math.floor(pieces / days.length), extra = pieces % days.length;
+    days.forEach((k, i) => {
+      const min = Math.min(720, (each + (i < extra ? 1 : 0)) * 15);
+      if (min) (planned[k] ??= {})[plan.id] = min;
+    });
+  }
+  return snapshot() !== before;
+}
+
+// Rebalances every plan, and saves if anything moved (say, a day went by with less studied than planned).
+function rebalanceAll() {
+  let changed = false;
+  for (const p of state.plans) changed = rebalancePlan(p) || changed;
+  if (changed) save();
+  return changed;
+}
+
+// A change you make by hand to a plan's time on a day: that day is pinned and the plan's other days adjust.
+function setByHand(k, id, min) {
+  const plan = planById(id);
+  setPlanned(k, id, min);
+  if (plan) { pinDay(plan, k); rebalancePlan(plan); }
 }
 
 // Removes a plan, every hour planned for it and its own progress. The study time itself stays in your stats.
@@ -1755,18 +1805,19 @@ function renderPlanList() {
     card.style.setProperty('--c', color);
     card.setAttribute('aria-pressed', planner.focus === p.id);
     card.title = 'Click to highlight this plan on the calendar';
-    const studied = planStudied(p), planned = planPlanned(p), unplanned = p.needMin - planned;
+    // "Planned ahead" is today and later: past days you skipped don't count as planned any more.
+    const studied = planStudied(p), planned = plannedFrom(p, today), unplanned = planMissing(p, today);
     const status = studied >= p.needMin ? '<span class="pl-stat ok">🎉 Done: you studied all the hours</span>'
       : left < 0 ? `<span class="pl-stat">Deadline passed with ${fmtShort(p.needMin - studied)} left</span>`
       : unplanned > 0 ? `<span class="pl-stat warn">⚠ ${fmtShort(unplanned)} still unplanned</span>`
-      : '<span class="pl-stat ok">✓ Fully planned</span>';
+      : `<span class="pl-stat ok">✓ Fully planned${p.auto ? ', and keeps itself balanced' : ''}</span>`;
     card.innerHTML = `<span class="pl-name"><span class="dot" style="background:${color}"></span>${escapeHtml(p.name)}</span>` +
       `<span class="pl-meta">${p.type} · ${escapeHtml(subjectName(p.subjectId))} · due ${fmtDayShort(p.deadline)} (${due})</span>` +
       `<span class="meter"><span class="meter-fill" style="width:${Math.min(100, (studied / p.needMin) * 100)}%"></span></span>` +
-      `<span class="pl-num">${fmtShort(studied)} studied of ${fmtShort(p.needMin)} · ${fmtShort(planned)} planned</span>${status}`;
+      `<span class="pl-num">${fmtShort(studied)} studied of ${fmtShort(p.needMin)} · ${fmtShort(planned)} planned ahead</span>${status}`;
     el.appendChild(card);
   }
-  $('autoFillBtn').disabled = !state.plans.some((p) => p.deadline >= today && planPlanned(p) < p.needMin);
+  $('autoFillBtn').disabled = !state.plans.some((p) => p.deadline >= today && (!p.auto || planMissing(p, today) > 0));
   const focused = planById(planner.focus);
   $('deletePlanBtn').hidden = !focused;
   if (focused) $('deletePlanBtn').textContent = `Delete “${focused.name}”`;
@@ -1789,9 +1840,11 @@ function renderCalendar() {
       .map((p) => `<span class="flag" title="Deadline: ${escapeHtml(p.name)}">🎯</span>`).join('');
     const items = plannedOn(k);
     // One pill per plan in its subject's colour; the others fade while a plan is highlighted.
-    const pills = items.map(({ plan, min }) =>
-      `<span class="pill${planner.focus && planner.focus !== plan.id ? ' faded' : ''}" style="--c:${subjectColor(plan.subjectId)}" ` +
-      `title="${escapeHtml(plan.name)}: ${fmtMinutes(min)}">${fmtHM(min)}</span>`).join('');
+    const pills = items.map(({ plan, min }) => {
+      const pinned = plan.auto && isPinned(plan, k); // set by you, shown in bold
+      return `<span class="pill${planner.focus && planner.focus !== plan.id ? ' faded' : ''}${pinned ? ' pinned' : ''}" ` +
+        `style="--c:${subjectColor(plan.subjectId)}" title="${escapeHtml(plan.name)}: ${fmtMinutes(min)}${pinned ? ' (set by you)' : ''}">${fmtHM(min)}</span>`;
+    }).join('');
     cell.innerHTML = `<span class="dn">${d.getDate()}</span>${flags}${pills}${dayTotalHtml(k, items)}`;
     cal.appendChild(cell);
   }
@@ -1808,8 +1861,18 @@ function dayTotalHtml(k, items) {
   return `<span class="tot${k < today && studied < planned ? ' short' : ''}" title="Studied / planned">${fmtHM(studied)} / ${fmtHM(planned)}</span>`;
 }
 
+// The rows of the day panel: the plans planned that day, plus balanced plans you pinned at 0 there
+// (so the day stays free for them, and you can unpin it).
+function dayRows(k) {
+  const rows = plannedOn(k);
+  for (const plan of state.plans) {
+    if (plan.auto && plan.deadline >= k && isPinned(plan, k) && !rows.some((r) => r.plan.id === plan.id)) rows.push({ plan, min: 0 });
+  }
+  return rows;
+}
+
 function renderDayPanel() {
-  const k = planner.selected, today = todayKey(), past = k < today, items = plannedOn(k);
+  const k = planner.selected, today = todayKey(), past = k < today, items = dayRows(k);
   const total = items.reduce((a, x) => a + x.min, 0);
   const tag = k === today ? '<span class="tile-sub">Today</span>' : past ? '<span class="tile-sub">Past day</span>' : '';
   let html = `<h2><span>${fmtDayLong(k)}</span>${tag}</h2>`;
@@ -1822,8 +1885,12 @@ function renderDayPanel() {
         // Click the time to type it (see startTimeEdit).
         `<button class="d-time-btn" data-edit="${plan.id}" title="Click to type the time" aria-label="Time for ${name}: ${fmtMinutes(min)}. Click to type it">${fmtShort(min)}</button>` +
         `<button data-step="15" data-plan="${plan.id}" aria-label="15 minutes more of ${name}">+</button></span>`;
+    // Balanced plans: 📌 on a day you set yourself (click to let it adjust again), "auto" on the others.
+    const pin = past || !plan.auto ? ''
+      : isPinned(plan, k) ? `<button class="d-pin" data-unpin="${plan.id}" title="You set this day yourself. Click to let it adjust by itself again" aria-label="Unpin ${name} on this day">📌</button>`
+      : '<span class="d-auto" title="Adjusts by itself to keep the plan balanced. Change it and it’s pinned">auto</span>';
     html += `<div class="d-row"><span class="nm"><span class="dot" style="background:${subjectColor(plan.subjectId)}"></span>${name}</span>` +
-      `${amount}<span class="st">${dayStudiedText(plan, k)}</span></div>`;
+      `${amount}${pin}<span class="st">${dayStudiedText(plan, k)}</span></div>`;
   }
   const addable = past ? [] : state.plans.filter((p) => p.deadline >= k && !items.some((x) => x.plan.id === p.id));
   if (addable.length) {
@@ -1858,7 +1925,7 @@ function finishTimeEdit(input, keep) {
     const min = parseDuration(input.value);
     if (min == null) { input.classList.add('bad'); return; }
     input.dataset.done = '1';
-    setPlanned(planner.selected, input.dataset.plan, min); // up to 12 h; 0 takes the plan off the day
+    setByHand(planner.selected, input.dataset.plan, min); // up to 12 h; 0 takes the plan off the day
     save();
   } else input.dataset.done = '1';
   renderPlanner();
@@ -2021,7 +2088,7 @@ function savePlanForm(e) {
   if (error) return;
   const plan = { id: `p${Date.now()}`, name, type: planFormType, subjectId: planFormSubject, created: today, deadline, needMin: Math.round(hours * 60) };
   state.plans.push(plan);
-  if ($('planAutoFill').checked) autoFillPlan(plan);
+  if ($('planAutoFill').checked) { plan.auto = true; rebalancePlan(plan); }
   save();
   $('planDialog').close();
   planner.focus = plan.id;
@@ -2069,16 +2136,20 @@ function initPlanner() {
     const k = planner.selected;
     const edit = e.target.closest('[data-edit]');
     if (edit) return startTimeEdit(edit);
-    const step = e.target.closest('[data-step]');
+    const step = e.target.closest('[data-step]'), unpin = e.target.closest('[data-unpin]');
     if (step) {
       const cur = state.planned[k]?.[step.dataset.plan] || 0;
-      setPlanned(k, step.dataset.plan, cur + Number(step.dataset.step));
+      setByHand(k, step.dataset.plan, cur + Number(step.dataset.step));
+    } else if (unpin) {
+      const plan = planById(unpin.dataset.unpin);
+      unpinDay(plan, k); // back to adjusting by itself
+      rebalancePlan(plan);
     } else if (e.target.closest('#copyDayBtn')) {
       const next = copyDayToNext(k);
       save();
       return selectDay(next); // show the day it was copied to
     } else if (e.target.closest('#clearDayBtn')) {
-      delete state.planned[k];
+      for (const { plan } of dayRows(k)) setByHand(k, plan.id, 0); // pinned at 0, so the day stays free
     } else return;
     save();
     renderPlanner();
@@ -2086,24 +2157,24 @@ function initPlanner() {
   $('dayPanel').addEventListener('change', (e) => {
     const t = e.target;
     if (t.id === 'dayAdd' && t.value) {
-      setPlanned(planner.selected, t.value, 60); // starts at 1 h; type the time or use − / +
+      setByHand(planner.selected, t.value, 60); // starts at 1 h; type the time or use − / +
     } else return;
     save();
     renderPlanner();
   });
   $('autoFillBtn').addEventListener('click', () => {
-    const today = todayKey();
-    let added = 0, plans = 0;
-    for (const p of state.plans) {
-      if (p.deadline < today) continue;
-      const min = autoFillPlan(p);
-      if (min) { added += min; plans++; }
+    const today = todayKey(), active = state.plans.filter((p) => p.deadline >= today);
+    for (const p of active) {
+      p.auto = true; // from now on it keeps itself balanced
+      rebalancePlan(p);
     }
     save();
     renderPlanner();
-    $('autoFillStatus').textContent = added
-      ? `Added ${fmtShort(added)} to ${plans} plan${plans === 1 ? '' : 's'}. Change any day with − / +.`
-      : 'There were no free weekdays left before the deadlines.';
+    const short = active.filter((p) => planMissing(p, today) > 0).length;
+    $('autoFillStatus').textContent = !short
+      ? 'Done: the missing hours are spread over the days left, and they’ll keep adjusting as you change days.'
+      : `${short} plan${short === 1 ? ' doesn’t' : 's don’t'} fit in the days left (12 h a day at most, weekdays only). ` +
+        'Unpin some days (📌), or plan weekends yourself.';
   });
   $('deletePlanBtn').addEventListener('click', async () => {
     const p = planById(planner.focus);
@@ -2135,6 +2206,8 @@ function initPlanner() {
   $('planCancel').addEventListener('click', () => $('planDialog').close());
   $('planForm').addEventListener('submit', savePlanForm);
   closeOnBackdropClick($('planDialog'));
+  // A new day may have gone by since the app was last open: move any missed time to the days left.
+  if (rebalanceAll()) renderTodayPlan();
 }
 
 // ---------- Settings ----------
