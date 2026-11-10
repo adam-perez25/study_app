@@ -114,6 +114,7 @@ input {
   width: 100%;
 }
 input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+input:disabled { opacity: .5; cursor: not-allowed; }
 
 button {
   font: inherit;

@@ -66,6 +66,21 @@ describe('buildPlan', () => {
     expect(blocks.at(-1).type).toBe('focus');
     blocks.filter((b) => b.type === 'focus').forEach((b) => expect(b.min).toBeLessThanOrEqual(120));
   });
+
+  it('with noBreaks, makes the whole time one focus block', () => {
+    expect(plan({ hours: 1, minutes: 35, noBreaks: true })).toEqual([{ type: 'focus', min: 95 }]);
+    expect(plan({ hours: 12, minutes: 59, noBreaks: true })).toEqual([{ type: 'focus', min: 779 }]);
+  });
+
+  it('with noBreaks and 0 minutes, returns no blocks', () => {
+    expect(plan({ hours: 0, minutes: 0, noBreaks: true })).toEqual([]);
+  });
+
+  it('keeps the normal plan when noBreaks is false or missing', () => {
+    const normal = plan({ hours: 2, minutes: 10 });
+    expect(normal.some((b) => b.type !== 'focus')).toBe(true);
+    expect(plan({ hours: 2, minutes: 10, noBreaks: false })).toEqual(normal);
+  });
 });
 
 describe('time formatting', () => {

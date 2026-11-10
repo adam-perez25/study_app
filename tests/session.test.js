@@ -284,3 +284,57 @@ describe('full screen and Do not disturb', () => {
     expect(desktop.calls).toEqual([]);
   });
 });
+
+describe('no breaks', () => {
+  const tickNoBreaks = (a) => {
+    a.$('noBreaks').checked = true;
+    a.$('noBreaks').dispatchEvent(new a.window.Event('change'));
+  };
+
+  it('ticking "No breaks" shows one focus block in the preview and greys out the break settings', () => {
+    app = loadApp();
+    expect(app.$('noBreaks').checked).toBe(false);
+    expect(app.$('planPreview').children.length).toBe(5); // 1 h: focus, break, focus, break, focus
+    tickNoBreaks(app);
+    expect(app.$('planSummary').textContent).toBe('1 focus block · 1 h of focus · no breaks');
+    expect(app.$('planPreview').children.length).toBe(1);
+    expect(app.$('planPreview').children[0].classList.contains('focus')).toBe(true);
+    for (const id of ['focusLen', 'shortLen', 'longLen', 'longEvery']) expect(app.$(id).disabled).toBe(true);
+    expect(app.$('noBreaksNote').classList.contains('hidden')).toBe(false);
+  });
+
+  it('unticking it brings back the normal plan', () => {
+    app = loadApp();
+    tickNoBreaks(app);
+    app.$('noBreaks').checked = false;
+    app.$('noBreaks').dispatchEvent(new app.window.Event('change'));
+    expect(app.$('planPreview').children.length).toBe(5);
+    expect(app.$('planSummary').textContent).toMatch(/of breaks$/);
+    expect(app.$('focusLen').disabled).toBe(false);
+    expect(app.$('noBreaksNote').classList.contains('hidden')).toBe(true);
+  });
+
+  it('is remembered after the app is reopened', () => {
+    app = loadApp();
+    tickNoBreaks(app);
+    const saved = app.saved();
+    expect(saved.settings.noBreaks).toBe(true);
+    app.close();
+    app = loadApp({ saved });
+    expect(app.$('noBreaks').checked).toBe(true);
+    expect(app.$('planPreview').children.length).toBe(1);
+  });
+
+  it('runs the session as one focus block and credits the full time', () => {
+    app = loadApp();
+    tickNoBreaks(app);
+    app.run('startSession()');
+    expect(app.state.session.blocks).toEqual([{ type: 'focus', min: 60 }]);
+    expect(app.$('timeLeft').textContent).toBe('1:00:00');
+    app.advance(60 * MIN);
+    expect(app.state.session).toBeNull();
+    expect(focusToday(app)).toBe(60 * MIN);
+    expect(app.state.sessionCount).toBe(1);
+    expect(app.$('done').classList.contains('hidden')).toBe(false);
+  });
+});

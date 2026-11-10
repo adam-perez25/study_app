@@ -45,6 +45,7 @@ The tests use [Vitest](https://vitest.dev/) and load `src/index.html` and `src/a
 ## How it works
 
 - **The time you pick is study time; breaks are added on top.** 30 min → 25 min focus, 5 min break, 5 min focus. 1 h → 25 + 5 + 25 + 5 + 10 min (70 min in all). Focus blocks never go over the length you chose, and the session never ends on a break.
+- **No breaks:** tick **No breaks** under the time picker on the start screen and the whole time is one focus block, with no short or long breaks. The plan preview shows a single block, the break settings are greyed out while it's on, and the choice is remembered for next time.
 - **Block settings** (focus length, break lengths, long break frequency) are under "Block settings" on the start screen.
 - A chime and a Windows notification mark each change between focus and break. Pick the chime (Bells, Soft, Digital or Marimba) and the volume, or mute it ("library mode"), under Sound in ⚙ Settings; the 🔔 button on the timer mutes it too.
 - **"I'm back":** by default the next focus block starts by itself when a break ends. Untick **Start focus blocks automatically after a break** in ⚙ Settings (or under Block settings) and the next focus block waits until you click **I'm back** (or ▶ on the mini timer), so it never runs while you're away. Breaks always start by themselves.
@@ -78,7 +79,6 @@ The tests use [Vitest](https://vitest.dev/) and load `src/index.html` and `src/a
 ## Roadmap
 
 - **See all levels and tiers:** right now the 📊 Stats screen only shows your current level. Add a way (for example, clicking the level badge) to see every level from Beginner to Transcendent, the hours each one needs, and the tier colour it belongs to (Bronze, Silver, Gold, Platinum, Diamond), with the ones you've reached marked and the hours left until the next one.
-- **Skip breaks:** add a "No breaks" option on the setup screen, before you start, so the whole session is one focus block with no short or long breaks. The chosen time is then all study time. It could be a checkbox next to the time picker (remembered in settings), and the plan preview should update to show a single focus block.
 - **Planner:** a new 📅 Plan screen (opened from the setup screen) to plan exams and projects over a calendar. Each plan has a name, a type (Exam or Project), a subject, a deadline and the hours needed. On a month calendar you choose how many hours of each plan to do on each day (15-minute steps, with "copy to next day" and "clear day"). Progress comes from the time you already study with that subject (`state.history`), so each plan shows hours studied, hours planned and a warning when the planned hours don't cover the hours needed. Suggested build order, one commit each on a `feature/planner` branch:
   1. Plans list, plan form and an empty month calendar (`state.plans`).
   2. Day panel that saves the hours per day (`state.planned`).

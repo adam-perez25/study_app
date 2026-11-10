@@ -26,6 +26,7 @@ state.settings.sound ??= {};       // chime: a key of CHIMES; volume: 0–1
 state.settings.sound.chime ??= 'bells';
 state.settings.sound.volume ??= 0.7;
 state.settings.sound.muted ??= false;
+state.settings.noBreaks ??= false; // on: the whole session is one focus block, with no breaks
 // Days saved before subjects existed were plain totals; keep them as "no subject".
 for (const [k, v] of Object.entries(state.history)) {
   if (typeof v === 'number') state.history[k] = { none: v };
@@ -42,9 +43,10 @@ function save() {
 
 // Builds the list of blocks for a session. The chosen time is study time:
 // focus blocks add up to it and breaks go between them on top, so a session
-// never ends on a break.
-function buildPlan({ hours, minutes, focusLen, shortLen, longLen, longEvery }) {
+// never ends on a break. With noBreaks on, the whole time is one focus block.
+function buildPlan({ hours, minutes, focusLen, shortLen, longLen, longEvery, noBreaks = false }) {
   let remaining = hours * 60 + minutes;
+  if (noBreaks) return remaining > 0 ? [{ type: 'focus', min: remaining }] : [];
   const blocks = [];
   let focusCount = 0;
 
@@ -125,10 +127,15 @@ function updatePreview() {
   const focusMin = focusBlocks.reduce((a, b) => a + b.min, 0);
   const planMin = blocks.reduce((a, b) => a + b.min, 0);
   const total = state.settings.hours * 60 + state.settings.minutes;
+  const noBreaks = state.settings.noBreaks;
+  const breakText = noBreaks ? 'no breaks' : `${fmtMinutes(planMin - focusMin)} of breaks`;
   $('planSummary').textContent = total
     ? `${focusBlocks.length} focus block${focusBlocks.length === 1 ? '' : 's'} · ` +
-      `${fmtMinutes(focusMin)} of focus · ${fmtMinutes(planMin - focusMin)} of breaks`
+      `${fmtMinutes(focusMin)} of focus · ${breakText}`
     : 'Choose how long you want to study.';
+  // The block settings don't apply to a single focus block.
+  for (const id of ['focusLen', 'shortLen', 'longLen', 'longEvery']) $(id).disabled = noBreaks;
+  $('noBreaksNote').classList.toggle('hidden', !noBreaks);
   $('startBtn').disabled = !total;
 
   document.querySelectorAll('#presets button').forEach((btn) => {
@@ -148,6 +155,12 @@ function initSetup() {
       $('minutes').value = min % 60;
       updatePreview();
     });
+  });
+  $('noBreaks').checked = state.settings.noBreaks;
+  $('noBreaks').addEventListener('change', () => {
+    state.settings.noBreaks = $('noBreaks').checked;
+    save();
+    updatePreview();
   });
   $('autoStartFocus').checked = state.settings.autoStartFocus;
   $('autoStartFocus').addEventListener('change', () => {
