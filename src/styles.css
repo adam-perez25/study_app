@@ -436,6 +436,46 @@ body.paused .time { opacity: .5; }
 .lv.cur { background: color-mix(in srgb, var(--tier) 18%, var(--card)); box-shadow: inset 0 0 0 1px var(--tier); }
 .lv.cur .s { color: var(--text); }
 
+/* Planner: plans on the left, a month calendar on the right (stacked in narrow windows) */
+#planner { max-width: 960px; }
+.pl-layout { display: grid; grid-template-columns: 270px 1fr; gap: 16px; align-items: start; }
+@media (max-width: 760px) { .pl-layout { grid-template-columns: 1fr; } }
+.pl-aside-title { margin: 0 0 8px; font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.pl-list { display: flex; flex-direction: column; gap: 10px; }
+.pl-card {
+  width: 100%; text-align: left; display: flex; flex-direction: column; gap: 5px;
+  padding: 12px; border-radius: var(--radius); background: var(--card);
+}
+.pl-card.on { border-color: var(--c); box-shadow: inset 0 0 0 1px var(--c); }
+.pl-name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.pl-meta { color: var(--muted); font-size: .8rem; }
+.pl-aside-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.pl-aside-actions .summary { margin: 0; font-size: .82rem; }
+.cal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.cal-head h2 { margin: 0 auto 0 4px; font-size: 1.05rem; }
+.cal-head button { padding: 6px 10px; }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.dow { font-size: .75rem; color: var(--muted); text-align: center; }
+.cal .cell {
+  position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 3px;
+  min-height: 88px; padding: 5px; text-align: left; border-radius: 8px; background: var(--card);
+}
+.cal .cell.other { opacity: .45; }
+.cal .cell.weekend { background: color-mix(in srgb, var(--card) 70%, var(--bg)); }
+.cal .cell.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.cell .dn { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; font-size: .8rem; font-weight: 600; }
+.cell.today .dn { background: var(--accent); color: #fff; }
+.cell .flag { position: absolute; top: 3px; right: 4px; font-size: .8rem; }
+@media (max-width: 520px) { .cal .cell { min-height: 60px; padding: 3px; } }
+/* New plan popup */
+.plan-dialog { width: min(460px, calc(100vw - 32px)); }
+.plan-dialog form { display: flex; flex-direction: column; gap: 12px; }
+.plan-dialog h2 { margin: 0; }
+.plan-dialog .row { margin-top: 0; }
+.field-label { display: block; margin-bottom: 4px; font-size: .85rem; color: var(--muted); }
+.confirm .plan-error { color: var(--danger); font-size: .85rem; min-height: 1.2em; margin: -4px 0 0; }
+.subject-chips .chip:disabled { opacity: .45; text-decoration: line-through; cursor: not-allowed; filter: none; }
+
 /* Sound settings popup: scrolls inside itself in short windows */
 .chime-list { list-style: none; margin: 0 0 12px; padding: 0; }
 .chime-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }

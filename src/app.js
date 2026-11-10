@@ -27,6 +27,8 @@ state.settings.sound.chime ??= 'bells';
 state.settings.sound.volume ??= 0.7;
 state.settings.sound.muted ??= false;
 state.settings.noBreaks ??= false; // on: the whole session is one focus block, with no breaks
+state.plans ??= [];   // { id, name, type: 'Exam' | 'Project', subjectId, created, deadline: 'YYYY-MM-DD', needMin }
+state.planned ??= {}; // { 'YYYY-MM-DD': { planId: minutes planned that day } }
 // Days saved before subjects existed were plain totals; keep them as "no subject".
 for (const [k, v] of Object.entries(state.history)) {
   if (typeof v === 'number') state.history[k] = { none: v };
@@ -348,7 +350,7 @@ function renderTasks() {
 let tickHandle = null;
 const RING_LEN = 2 * Math.PI * 90;
 
-const SCREENS = ['setup', 'session', 'done', 'stats', 'settings'];
+const SCREENS = ['setup', 'session', 'done', 'stats', 'settings', 'planner'];
 function currentScreen() { return SCREENS.find((id) => !$(id).classList.contains('hidden')); }
 
 function show(screen) {
@@ -360,6 +362,7 @@ function show(screen) {
   if (screen === 'setup') { renderTodayCard(); renderSubjectPicker(); }
   if (screen === 'stats') renderStats();
   if (screen === 'settings') { renderSettings(); renderSound(); }
+  if (screen === 'planner') renderPlanner();
   window.scrollTo(0, 0);
 }
 
@@ -639,6 +642,26 @@ function askConfirm({ title, text, yes, no }) {
     dlg.onclose = () => done(false); // Esc
     dlg.showModal();
   });
+}
+
+// Closes a popup when you click outside it. A click on the backdrop lands on the <dialog> itself,
+// so it only closes when the click is outside the box. The press must start there too, so dragging
+// a text selection out of the popup doesn't close it.
+function closeOnBackdropClick(dlg) {
+  let pressedOnBackdrop = false;
+  dlg.addEventListener('mousedown', (e) => { pressedOnBackdrop = e.target === dlg; });
+  dlg.addEventListener('click', (e) => {
+    if (e.target !== dlg || !pressedOnBackdrop) return;
+    const r = dlg.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
+  });
+  // Keys pressed in the popup (Space on a button, Esc) shouldn't also pause the session or leave full screen.
+  dlg.addEventListener('keydown', (e) => e.stopPropagation());
+}
+
+// Text typed by the user, made safe to put inside HTML.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 // Closing the window during a session (asked by the desktop app).
@@ -1110,9 +1133,13 @@ function renderSubjectEdit() {
 
 // Removes a subject. The time studied for it moves to "No subject", so totals, streak and badges stay.
 async function deleteSubject(s) {
+  const plans = state.plans.filter((p) => p.subjectId === s.id);
   const ok = await askConfirm({
     title: `Delete “${s.name}”?`,
     text: 'The subject is removed everywhere. The time you studied for it stays in your stats as “No subject”. ' +
+      // A plan counts the time studied with its subject, so it can't outlive the subject.
+      (plans.length ? `Its plan${plans.length === 1 ? '' : 's'} (${plans.map((p) => `“${p.name}”`).join(', ')}) ` +
+        `${plans.length === 1 ? 'is' : 'are'} deleted too. ` : '') +
       'This can’t be undone.',
     yes: 'Delete subject',
     no: 'Cancel',
@@ -1124,6 +1151,7 @@ async function deleteSubject(s) {
     delete day[s.id];
   }
   state.subjects = state.subjects.filter((x) => x !== s);
+  for (const p of plans) removePlan(p.id);
   if (state.settings.subjectId === s.id) state.settings.subjectId = null;
   if (state.session?.subjectId === s.id) state.session.subjectId = null; // the rest of this session counts as "No subject"
   save();
@@ -1529,17 +1557,7 @@ function initLevels() {
     openLevels();
   });
   $('levelsClose').addEventListener('click', () => dlg.close());
-  // A click on the backdrop lands on the <dialog> itself, so only close when it's outside the box.
-  // The press must start there too, so dragging a text selection out of the popup doesn't close it.
-  let pressedOnBackdrop = false;
-  dlg.addEventListener('mousedown', (e) => { pressedOnBackdrop = e.target === dlg; });
-  dlg.addEventListener('click', (e) => {
-    if (e.target !== dlg || !pressedOnBackdrop) return;
-    const r = dlg.getBoundingClientRect();
-    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
-  });
-  // Keys pressed in the popup (Space on ✕, Esc) shouldn't also pause the session or leave full screen.
-  dlg.addEventListener('keydown', (e) => e.stopPropagation());
+  closeOnBackdropClick(dlg);
 }
 
 function initStats() {
@@ -1571,6 +1589,213 @@ function initStats() {
     tip.style.left = `${left}px`;
     tip.style.top = `${r.top - tip.offsetHeight - 8}px`;
   });
+}
+
+// ---------- Planner ----------
+
+// Plans for exams and projects. A plan's progress is the time studied with its subject, from the day the
+// plan was made until its deadline. So a subject can only have one active plan, or that time would count twice.
+const planner = { month: null, selected: null, focus: null }; // what the Planner screen shows; not saved
+let planFormType = 'Exam', planFormSubject = null;
+
+function todayKey() { return dayKey(new Date()); }
+function keyAdd(k, n) { return dayKey(addDays(parseKey(k), n)); }
+function daysBetween(a, b) { return Math.round((parseKey(b) - parseKey(a)) / 864e5); }
+function fmtDayShort(k) { return parseKey(k).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' }); }
+function fmtDayLong(k) { return parseKey(k).toLocaleDateString(LOCALE, { weekday: 'long', day: 'numeric', month: 'long' }); }
+
+// Day keys for the whole weeks (Monday first) that cover a month (0–11).
+function monthGrid(year, month) {
+  const first = new Date(year, month, 1), offset = (first.getDay() + 6) % 7;
+  const weeks = Math.ceil((offset + new Date(year, month + 1, 0).getDate()) / 7);
+  return Array.from({ length: weeks * 7 }, (_, i) => dayKey(addDays(first, i - offset)));
+}
+
+// The plan a subject's study time counts toward right now, if any.
+function activePlan(subjectId, plans = state.plans, today = todayKey()) {
+  return plans.find((p) => p.subjectId === subjectId && p.deadline >= today) || null;
+}
+function planById(id) { return state.plans.find((p) => p.id === id) || null; }
+
+// Removes a plan and every hour planned for it.
+function removePlan(id) {
+  state.plans = state.plans.filter((p) => p.id !== id);
+  for (const [k, day] of Object.entries(state.planned)) {
+    delete day[id];
+    if (!Object.keys(day).length) delete state.planned[k];
+  }
+  if (planner.focus === id) planner.focus = null;
+}
+
+function renderPlanList() {
+  const el = $('planList'), today = todayKey();
+  el.innerHTML = state.plans.length ? '' : '<p class="summary">No plans yet. Add an exam or a project with “+ New plan”.</p>';
+  for (const p of state.plans) {
+    const left = daysBetween(today, p.deadline), color = subjectColor(p.subjectId);
+    const due = left < 0 ? 'deadline passed' : left === 0 ? 'due today' : `${left} day${left === 1 ? '' : 's'} left`;
+    const card = document.createElement('button');
+    card.className = 'pl-card' + (planner.focus === p.id ? ' on' : '');
+    card.dataset.plan = p.id;
+    card.style.setProperty('--c', color);
+    card.setAttribute('aria-pressed', planner.focus === p.id);
+    card.title = 'Click to highlight this plan on the calendar';
+    card.innerHTML = `<span class="pl-name"><span class="dot" style="background:${color}"></span>${escapeHtml(p.name)}</span>` +
+      `<span class="pl-meta">${p.type} · ${escapeHtml(subjectName(p.subjectId))} · due ${fmtDayShort(p.deadline)} (${due})</span>`;
+    el.appendChild(card);
+  }
+  const focused = planById(planner.focus);
+  $('deletePlanBtn').hidden = !focused;
+  if (focused) $('deletePlanBtn').textContent = `Delete “${focused.name}”`;
+}
+
+function renderCalendar() {
+  const { year, month } = planner.month, today = todayKey();
+  $('calTitle').textContent = new Date(year, month, 1).toLocaleDateString(LOCALE, { month: 'long', year: 'numeric' });
+  const cal = $('calendar');
+  cal.innerHTML = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => `<div class="dow">${d}</div>`).join('');
+  for (const k of monthGrid(year, month)) {
+    const d = parseKey(k), weekday = (d.getDay() + 6) % 7;
+    const cell = document.createElement('button');
+    cell.className = ['cell', d.getMonth() !== month && 'other', weekday > 4 && 'weekend', k === today && 'today',
+      k === planner.selected && 'sel'].filter(Boolean).join(' ');
+    cell.dataset.day = k;
+    cell.setAttribute('aria-pressed', k === planner.selected);
+    cell.setAttribute('aria-label', fmtDayLong(k));
+    const flags = state.plans.filter((p) => p.deadline === k)
+      .map((p) => `<span class="flag" title="Deadline: ${escapeHtml(p.name)}">🎯</span>`).join('');
+    cell.innerHTML = `<span class="dn">${d.getDate()}</span>${flags}`;
+    cal.appendChild(cell);
+  }
+}
+
+function renderPlanner() {
+  planner.selected ??= todayKey();
+  if (!planner.month) {
+    const d = parseKey(planner.selected);
+    planner.month = { year: d.getFullYear(), month: d.getMonth() };
+  }
+  renderPlanList();
+  renderCalendar();
+}
+
+function selectDay(k) {
+  planner.selected = k;
+  const d = parseKey(k);
+  planner.month = { year: d.getFullYear(), month: d.getMonth() };
+  renderPlanner();
+}
+
+function moveMonth(step) {
+  const m = planner.month.month + step;
+  planner.month = { year: planner.month.year + Math.floor(m / 12), month: ((m % 12) + 12) % 12 };
+  renderCalendar();
+}
+
+// ---- New plan popup ----
+function renderPlanFormChoices() {
+  document.querySelectorAll('#planType button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.type === planFormType);
+    b.setAttribute('aria-checked', b.dataset.type === planFormType);
+  });
+  const el = $('planSubjects'), subjects = state.subjects.filter((s) => !s.hidden);
+  el.innerHTML = subjects.length ? ''
+    : '<span class="summary">Add a subject on the start screen first: a plan counts the time you study with its subject.</span>';
+  for (const s of subjects) {
+    const taken = activePlan(s.id);
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip' + (s.id === planFormSubject ? ' selected' : '');
+    chip.dataset.subject = s.id;
+    chip.style.setProperty('--chip-color', subjectColor(s.id));
+    chip.setAttribute('aria-pressed', s.id === planFormSubject);
+    chip.disabled = !!taken;
+    if (taken) chip.title = `Already used by “${taken.name}”. One plan per subject, so study time is never counted twice.`;
+    chip.innerHTML = `<span class="dot" style="background:${subjectColor(s.id)}"></span>`;
+    chip.append(s.name);
+    el.appendChild(chip);
+  }
+}
+
+function openPlanForm() {
+  planFormType = 'Exam';
+  planFormSubject = null;
+  $('planName').value = '';
+  $('planDeadline').min = todayKey();
+  $('planDeadline').value = keyAdd(todayKey(), 14);
+  $('planHours').value = 10;
+  $('planError').textContent = '';
+  renderPlanFormChoices();
+  $('planDialog').showModal();
+  $('planName').focus();
+}
+
+function savePlanForm(e) {
+  e.preventDefault();
+  const name = $('planName').value.trim(), deadline = $('planDeadline').value;
+  const hours = parseFloat($('planHours').value), today = todayKey();
+  const error = !name ? 'Give the plan a name.'
+    : !planFormSubject ? 'Pick a subject, so the time you study counts toward this plan.'
+    : activePlan(planFormSubject) ? 'That subject already has a plan.'
+    : !/^\d{4}-\d{2}-\d{2}$/.test(deadline) || deadline < today ? 'The deadline can’t be before today.'
+    : !(hours > 0 && hours <= 500) ? 'Hours needed must be more than 0 and at most 500.'
+    : '';
+  $('planError').textContent = error;
+  if (error) return;
+  const plan = { id: `p${Date.now()}`, name, type: planFormType, subjectId: planFormSubject, created: today, deadline, needMin: Math.round(hours * 60) };
+  state.plans.push(plan);
+  save();
+  $('planDialog').close();
+  planner.focus = plan.id;
+  renderPlanner();
+}
+
+function initPlanner() {
+  $('planBtn').addEventListener('click', () => show('planner'));
+  $('plannerBack').addEventListener('click', () => show('setup'));
+  $('newPlanBtn').addEventListener('click', openPlanForm);
+  $('planList').addEventListener('click', (e) => {
+    const card = e.target.closest('[data-plan]');
+    if (!card) return;
+    planner.focus = planner.focus === card.dataset.plan ? null : card.dataset.plan; // click again to clear
+    renderPlanner();
+  });
+  $('calendar').addEventListener('click', (e) => {
+    const cell = e.target.closest('[data-day]');
+    if (cell) selectDay(cell.dataset.day);
+  });
+  $('calPrev').addEventListener('click', () => moveMonth(-1));
+  $('calNext').addEventListener('click', () => moveMonth(1));
+  $('calToday').addEventListener('click', () => selectDay(todayKey()));
+  $('deletePlanBtn').addEventListener('click', async () => {
+    const p = planById(planner.focus);
+    if (!p) return;
+    const ok = await askConfirm({
+      title: `Delete “${p.name}”?`,
+      text: 'The plan and the hours planned for it are removed. The time you studied stays in your stats. This can’t be undone.',
+      yes: 'Delete plan',
+      no: 'Cancel',
+    });
+    if (!ok || !planById(p.id)) return;
+    removePlan(p.id);
+    save();
+    renderPlanner();
+  });
+
+  $('planType').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-type]');
+    if (!b) return;
+    planFormType = b.dataset.type;
+    renderPlanFormChoices();
+  });
+  $('planSubjects').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-subject]');
+    if (!chip || chip.disabled) return;
+    planFormSubject = chip.dataset.subject;
+    renderPlanFormChoices();
+  });
+  $('planCancel').addEventListener('click', () => $('planDialog').close());
+  $('planForm').addEventListener('submit', savePlanForm);
+  closeOnBackdropClick($('planDialog'));
 }
 
 // ---------- Settings ----------
@@ -1666,6 +1891,7 @@ initSetup();
 initSubjects();
 initSession();
 initStats();
+initPlanner();
 initShare();
 initSettings();
 initSound();
