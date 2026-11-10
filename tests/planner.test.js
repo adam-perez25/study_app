@@ -127,19 +127,6 @@ describe('new plan popup', () => {
     expect(app.$('planDialog').open).toBe(true);
   });
 
-  it('offers Exam, Project and Practical, and saves a Practical', () => {
-    openPlanner(saved());
-    app.$('newPlanBtn').click();
-    expect([...app.$('planType').querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Exam', 'Project', 'Practical']);
-    app.$('planName').value = 'Lab practical 2';
-    app.$('planType').querySelector('[data-type="Practical"]').click();
-    expect(app.$('planType').querySelector('.active').dataset.type).toBe('Practical');
-    app.$('planSubjects').querySelector('[data-subject="s2"]').click();
-    submit(app.$('planForm'));
-    expect(app.saved().plans[0].type).toBe('Practical');
-    expect(app.$('planList').textContent).toContain('Practical · Physics');
-  });
-
   it('lets a subject have an exam and a project at the same time', () => {
     openPlanner(saved({ plans: [plan()] }));
     app.$('newPlanBtn').click();
@@ -181,29 +168,52 @@ describe('hours per day', () => {
     expect(app.state.planned[day(1)]).toBeUndefined(); // an empty day is removed
   });
 
-  it('lets you type the hours and minutes', () => {
-    openPlanner(saved({ plans: [plan()], planned: { [day(0)]: { p1: 60 } } }));
-    const set = (cls, value) => {
-      const input = app.$('dayPanel').querySelector(cls);
-      input.value = value;
-      input.dispatchEvent(new app.window.Event('change', { bubbles: true }));
+  it('reads typed times like 1:30, 90 or 1h 30', () => {
+    app = loadApp();
+    const parse = (t) => app.run(`parseDuration(${JSON.stringify(t)})`);
+    expect(['1:30', '90', '90m', '90 min', '1h 30', '1h30m', '1.5h', '1,5h', '2h', ' 0:45 '].map(parse))
+      .toEqual([90, 90, 90, 90, 90, 90, 90, 90, 120, 45]);
+    expect(['', 'abc', '1:', '-5', 'h'].map(parse)).toEqual([null, null, null, null, null]);
+  });
+
+  it('lets you click the time and type a new one', () => {
+    openPlanner(saved({ plans: [plan()], planned: { [day(0)]: { p1: 90 } } }));
+    const key = (el, k) => el.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: k, bubbles: true }));
+    const edit = (text, k = 'Enter') => {
+      app.$('dayPanel').querySelector('[data-edit="p1"]').click();
+      const input = app.$('dayPanel').querySelector('.d-time-input');
+      input.value = text;
+      key(input, k);
+      return input;
     };
-    expect(app.$('dayPanel').querySelector('.d-h').value).toBe('1');
-    expect(app.$('dayPanel').querySelector('.d-m').value).toBe('0');
-    set('.d-m', '20');
-    expect(app.saved().planned[day(0)].p1).toBe(80); // 1 h 20, exactly as typed
-    set('.d-h', '0');
-    expect(app.saved().planned[day(0)].p1).toBe(20);
-    set('.d-m', '90');
-    expect(app.saved().planned[day(0)].p1).toBe(90);
-    expect(app.$('dayPanel').querySelector('.d-h').value).toBe('1'); // shown as 1 h 30
-    expect(app.$('dayPanel').querySelector('.d-m').value).toBe('30');
+    expect(app.$('dayPanel').querySelector('[data-edit="p1"]').textContent).toBe('1h 30m');
+    app.$('dayPanel').querySelector('[data-edit="p1"]').click();
+    expect(app.$('dayPanel').querySelector('.d-time-input').value).toBe('1:30'); // starts with the current time
+    key(app.$('dayPanel').querySelector('.d-time-input'), 'Escape');
+    edit('1:20');
+    expect(app.saved().planned[day(0)].p1).toBe(80); // exactly as typed
+    expect(app.$('dayPanel').querySelector('[data-edit="p1"]').textContent).toBe('1h 20m');
+    edit('45', 'Escape'); // Esc cancels
+    expect(app.saved().planned[day(0)].p1).toBe(80);
+    const bad = edit('soon');
+    expect(bad.classList.contains('bad')).toBe(true); // not a time: stays in the box, marked
+    expect(app.saved().planned[day(0)].p1).toBe(80);
+    key(bad, 'Escape');
     app.$('dayPanel').querySelector('[data-step="15"]').click(); // − / + still move 15 minutes
-    expect(app.saved().planned[day(0)].p1).toBe(105);
-    set('.d-h', '20');
+    expect(app.saved().planned[day(0)].p1).toBe(95);
+    edit('20h');
     expect(app.saved().planned[day(0)].p1).toBe(720); // 12 h at most
-    set('.d-h', '0'); // 0 h 0 min
+    edit('0');
     expect(app.saved().planned).toEqual({}); // 0 takes the plan off the day
+  });
+
+  it('saves a typed time when you click somewhere else', () => {
+    openPlanner(saved({ plans: [plan()], planned: { [day(0)]: { p1: 90 } } }));
+    app.$('dayPanel').querySelector('[data-edit="p1"]').click();
+    const input = app.$('dayPanel').querySelector('.d-time-input');
+    input.value = '2h';
+    input.dispatchEvent(new app.window.FocusEvent('focusout', { bubbles: true }));
+    expect(app.saved().planned[day(0)].p1).toBe(120);
   });
 
   it('adds a plan to the selected day, then changes it in 15-minute steps', () => {

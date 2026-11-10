@@ -27,7 +27,7 @@ state.settings.sound.chime ??= 'bells';
 state.settings.sound.volume ??= 0.7;
 state.settings.sound.muted ??= false;
 state.settings.noBreaks ??= false; // on: the whole session is one focus block, with no breaks
-state.plans ??= [];   // { id, name, type: 'Exam' | 'Project' | 'Practical', subjectId, created, deadline: 'YYYY-MM-DD', needMin }
+state.plans ??= [];   // { id, name, type: 'Exam' | 'Project', subjectId, created, deadline: 'YYYY-MM-DD', needMin }
 state.planned ??= {}; // { 'YYYY-MM-DD': { planId: minutes planned that day } }
 state.planHistory ??= {}; // { 'YYYY-MM-DD': { planId: focused ms } }: the sessions you did for each plan
 state.settings.planId ??= null; // plan the next session counts toward: a plan id, 'none', or null to pick one automatically
@@ -1675,6 +1675,16 @@ function setPlanned(k, id, min) {
   if (!Object.keys(day).length) delete state.planned[k];
 }
 
+// Reads a typed study time as minutes: "1:30", "90", "90m", "1h 30", "1h30m", "1.5h". null if it isn't one.
+function parseDuration(text) {
+  const t = String(text).trim().toLowerCase().replace(',', '.');
+  let m = t.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (m) return Number(m[1]) * 60 + Number(m[2]);
+  m = t.match(/^(?:(\d+(?:\.\d+)?)\s*h)?\s*(?:(\d+)\s*(?:m|min|mins)?)?$/);
+  if (!m || (!m[1] && !m[2])) return null;
+  return Math.round((m[1] ? parseFloat(m[1]) * 60 : 0) + (m[2] ? Number(m[2]) : 0));
+}
+
 // Makes the next day the same as this one (plans already past their deadline by then are left out).
 function copyDayToNext(k) {
   const next = keyAdd(k, 1), copy = {};
@@ -1809,9 +1819,8 @@ function renderDayPanel() {
     // Days before today can't be planned any more, so they only show what was planned.
     const amount = past ? `<b class="d-min">${fmtShort(min)}</b>`
       : `<span class="stepper"><button data-step="-15" data-plan="${plan.id}" aria-label="15 minutes less of ${name}">−</button>` +
-        // Or type the time: hours and minutes, saved when you leave the box or press Enter.
-        `<label class="d-time"><input type="number" class="d-h" data-plan="${plan.id}" min="0" max="12" value="${Math.floor(min / 60)}" aria-label="Hours of ${name}"> h</label>` +
-        `<label class="d-time"><input type="number" class="d-m" data-plan="${plan.id}" min="0" max="59" step="5" value="${min % 60}" aria-label="Minutes of ${name}"> min</label>` +
+        // Click the time to type it (see startTimeEdit).
+        `<button class="d-time-btn" data-edit="${plan.id}" title="Click to type the time" aria-label="Time for ${name}: ${fmtMinutes(min)}. Click to type it">${fmtShort(min)}</button>` +
         `<button data-step="15" data-plan="${plan.id}" aria-label="15 minutes more of ${name}">+</button></span>`;
     html += `<div class="d-row"><span class="nm"><span class="dot" style="background:${subjectColor(plan.subjectId)}"></span>${name}</span>` +
       `${amount}<span class="st">${dayStudiedText(plan, k)}</span></div>`;
@@ -1825,6 +1834,34 @@ function renderDayPanel() {
     `<span class="btns"><button id="copyDayBtn" ${items.length && keyAdd(k, 1) >= today ? '' : 'disabled'}>Copy to next day</button>` +
     `<button id="clearDayBtn" class="danger" ${items.length && !past ? '' : 'disabled'}>Clear day</button></span></div>`;
   $('dayPanel').innerHTML = html;
+}
+
+// Clicking a plan's time in the day panel turns it into a text box: type 1:30, 90 or 1h 30, then Enter.
+function startTimeEdit(btn) {
+  const id = btn.dataset.edit, min = state.planned[planner.selected]?.[id] || 0;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'd-time-input';
+  input.dataset.plan = id;
+  input.value = `${Math.floor(min / 60)}:${pad(min % 60)}`;
+  input.title = 'Type 1:30, 90 or 1h 30, then press Enter (Esc cancels)';
+  input.setAttribute('aria-label', btn.getAttribute('aria-label').replace('Click to type it', 'Type the time'));
+  btn.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+// Saves (keep) or cancels a typed time. Something that isn't a time stays in the box, marked, until fixed or Esc.
+function finishTimeEdit(input, keep) {
+  if (input.dataset.done) return; // already handled (Enter, then the box losing focus)
+  if (keep) {
+    const min = parseDuration(input.value);
+    if (min == null) { input.classList.add('bad'); return; }
+    input.dataset.done = '1';
+    setPlanned(planner.selected, input.dataset.plan, min); // up to 12 h; 0 takes the plan off the day
+    save();
+  } else input.dataset.done = '1';
+  renderPlanner();
 }
 
 // What was studied for a plan on a day (nothing to show for days still ahead).
@@ -2019,8 +2056,19 @@ function initPlanner() {
   $('calPrev').addEventListener('click', () => moveMonth(-1));
   $('calNext').addEventListener('click', () => moveMonth(1));
   $('calToday').addEventListener('click', () => selectDay(todayKey()));
+  $('dayPanel').addEventListener('keydown', (e) => {
+    if (!e.target.matches('.d-time-input')) return;
+    if (e.key === 'Enter') { e.preventDefault(); finishTimeEdit(e.target, true); }
+    if (e.key === 'Escape') finishTimeEdit(e.target, false);
+  });
+  // Clicking somewhere else saves what you typed, if it makes sense; otherwise the old time stays.
+  $('dayPanel').addEventListener('focusout', (e) => {
+    if (e.target.matches('.d-time-input')) finishTimeEdit(e.target, parseDuration(e.target.value) != null);
+  });
   $('dayPanel').addEventListener('click', (e) => {
     const k = planner.selected;
+    const edit = e.target.closest('[data-edit]');
+    if (edit) return startTimeEdit(edit);
     const step = e.target.closest('[data-step]');
     if (step) {
       const cur = state.planned[k]?.[step.dataset.plan] || 0;
@@ -2039,9 +2087,6 @@ function initPlanner() {
     const t = e.target;
     if (t.id === 'dayAdd' && t.value) {
       setPlanned(planner.selected, t.value, 60); // starts at 1 h; type the time or use − / +
-    } else if (t.matches('.d-h, .d-m')) {
-      const row = t.closest('.d-row'), num = (sel) => Math.max(0, parseInt(row.querySelector(sel).value, 10) || 0);
-      setPlanned(planner.selected, t.dataset.plan, num('.d-h') * 60 + num('.d-m')); // 90 min is fine too: it becomes 1 h 30
     } else return;
     save();
     renderPlanner();
