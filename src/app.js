@@ -143,6 +143,7 @@ function updatePreview() {
   document.querySelectorAll('#presets button').forEach((btn) => {
     btn.classList.toggle('active', Number(btn.dataset.min) === total);
   });
+  renderTodayPlan(); // its highlight follows the time picked here
 }
 
 function initSetup() {
@@ -231,6 +232,7 @@ function renderSubjectPicker() {
   $('subjectHint').hidden = hasSubjects;
   $('subjectHint').textContent = 'Optional. Add a subject to see how much time each one gets in your stats.';
   $('subjectPicker').title = picked ? 'Click the selected subject again to study without one' : '';
+  renderTodayPlan(); // its highlight follows the subject picked here
 }
 
 function renderSwatches() {
@@ -1796,6 +1798,45 @@ function moveMonth(step) {
   renderCalendar();
 }
 
+// ---- "Today's plan" card on the start screen ----
+// Plans of hidden subjects are left out, because a hidden subject can't be picked to study.
+function todaysPlans() {
+  const today = todayKey();
+  return plannedOn(today).filter(({ plan }) => plan.deadline >= today && subjectById(plan.subjectId) && !subjectById(plan.subjectId).hidden);
+}
+
+function renderTodayPlan() {
+  const items = todaysPlans(), today = todayKey();
+  $('todayPlanCard').hidden = !items.length;
+  const total = state.settings.hours * 60 + state.settings.minutes;
+  const el = $('todayPlanList');
+  el.innerHTML = '';
+  for (const { plan, min } of items) {
+    const done = planStudiedOn(plan, today), color = subjectColor(plan.subjectId);
+    const row = document.createElement('button');
+    // Highlighted while the start screen is set to exactly this plan.
+    const picked = currentSubjectId() === plan.subjectId && total === min;
+    row.className = 'tp-row' + (picked ? ' selected' : '');
+    row.dataset.plan = plan.id;
+    row.style.setProperty('--c', color);
+    row.setAttribute('aria-pressed', picked);
+    row.innerHTML = `<span class="dot" style="background:${color}"></span><span class="tp-name">${escapeHtml(plan.name)}</span>` +
+      `<span class="tp-time">${fmtMinutes(min)}</span><span class="tp-done">${done >= 1 ? `${fmtShort(done)} done` : 'not started'}</span>`;
+    el.appendChild(row);
+  }
+}
+
+// Fills in the start screen for a plan: its time for today and its subject.
+function pickTodayPlan(id) {
+  const item = todaysPlans().find((x) => x.plan.id === id);
+  if (!item) return;
+  $('hours').value = Math.floor(item.min / 60);
+  $('minutes').value = item.min % 60;
+  state.settings.subjectId = item.plan.subjectId;
+  updatePreview(); // saves, and redraws this card
+  renderSubjectPicker();
+}
+
 // ---- New plan popup ----
 function renderPlanFormChoices() {
   document.querySelectorAll('#planType button').forEach((b) => {
@@ -1856,6 +1897,10 @@ function savePlanForm(e) {
 
 function initPlanner() {
   $('planBtn').addEventListener('click', () => show('planner'));
+  $('todayPlanList').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-plan]');
+    if (row) pickTodayPlan(row.dataset.plan);
+  });
   $('plannerBack').addEventListener('click', () => show('setup'));
   $('newPlanBtn').addEventListener('click', openPlanForm);
   $('planList').addEventListener('click', (e) => {

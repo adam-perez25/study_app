@@ -286,6 +286,51 @@ describe('progress', () => {
   });
 });
 
+describe("today's plan on the start screen", () => {
+  const today = () => ({ plans: [plan(), plan({ id: 'p2', name: 'Lab report', subjectId: 's2' })], planned: { [day(0)]: { p1: 90, p2: 45 }, [day(1)]: { p1: 60 } } });
+
+  it('is hidden when nothing is planned for today', () => {
+    app = loadApp({ saved: saved({ plans: [plan()], planned: { [day(1)]: { p1: 60 } } }) });
+    expect(app.$('todayPlanCard').hidden).toBe(true);
+  });
+
+  it("lists today's plans with their time and what's done", () => {
+    app = loadApp({ saved: saved({ ...today(), history: { [day(0)]: { s1: 25 * MIN } } }) });
+    expect(app.$('todayPlanCard').hidden).toBe(false);
+    const rows = [...app.$('todayPlanList').querySelectorAll('.tp-row')].map((r) => r.textContent);
+    expect(rows).toEqual(['Calculus exam1 h 30 min25m done', 'Lab report45 minnot started']);
+  });
+
+  it('fills in the time and subject when you pick one, and highlights it', () => {
+    app = loadApp({ saved: saved(today()) });
+    app.$('todayPlanList').querySelector('[data-plan="p2"]').click();
+    expect(app.$('hours').value).toBe('0');
+    expect(app.$('minutes').value).toBe('45');
+    expect(app.saved().settings).toMatchObject({ hours: 0, minutes: 45, subjectId: 's2' });
+    expect(app.$('subjectPicker').querySelector('.chip.selected').textContent).toBe('Physics');
+    expect(app.$('todayPlanList').querySelector('.selected').dataset.plan).toBe('p2');
+    // Changing the time afterwards means it's no longer exactly that plan.
+    app.$('minutes').value = '50';
+    app.$('minutes').dispatchEvent(new app.window.Event('input'));
+    expect(app.$('todayPlanList').querySelector('.selected')).toBeNull();
+  });
+
+  it('shows what you planned in the Planner when you come back', () => {
+    openPlanner(saved({ plans: [plan()] }));
+    const add = app.$('dayAdd');
+    add.value = 'p1';
+    add.dispatchEvent(new app.window.Event('change', { bubbles: true }));
+    app.$('plannerBack').click();
+    expect(app.$('todayPlanCard').hidden).toBe(false);
+    expect(app.$('todayPlanList').textContent).toContain('Calculus exam');
+  });
+
+  it('leaves out plans whose subject is hidden', () => {
+    app = loadApp({ saved: saved({ ...today(), subjects: [SUBJECTS[0], { ...SUBJECTS[1], hidden: true }] }) });
+    expect([...app.$('todayPlanList').querySelectorAll('[data-plan]')].map((r) => r.dataset.plan)).toEqual(['p1']);
+  });
+});
+
 describe('deleting', () => {
   it('deletes a plan and the hours planned for it, after asking', async () => {
     openPlanner(saved({ plans: [plan(), plan({ id: 'p2', subjectId: 's2' })], planned: { [day(1)]: { p1: 60, p2: 30 }, [day(2)]: { p1: 45 } } }));
