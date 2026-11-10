@@ -331,6 +331,65 @@ describe("today's plan on the start screen", () => {
   });
 });
 
+describe('auto-fill', () => {
+  // Today is Wed 28 Oct; p1 is due Sat 7 Nov, so its weekdays are 28, 29, 30 Oct and 2–6 Nov (8 days).
+  const weekdays = [0, 1, 2, 5, 6, 7, 8, 9].map(day);
+
+  it('spreads the missing hours evenly over the weekdays before the deadline', () => {
+    app = loadApp({ saved: saved({ plans: [plan()] }) });
+    expect(app.run(`autoFillPlan(planById('p1'))`)).toBe(600);
+    expect(Object.keys(app.state.planned).sort()).toEqual(weekdays);
+    expect(Object.values(app.state.planned).map((d) => d.p1)).toEqual(Array(8).fill(75));
+  });
+
+  it('only adds what is missing, on days the plan has nothing yet', () => {
+    app = loadApp({ saved: saved({ plans: [plan()], planned: { [day(1)]: { p1: 60 } } }) });
+    expect(app.run(`autoFillPlan(planById('p1'))`)).toBe(540);
+    expect(app.state.planned[day(1)].p1).toBe(60); // left as it was
+    expect(app.run(`planPlanned(planById('p1'))`)).toBe(600);
+    // 540 min over the 7 other weekdays: 75 min each, plus one extra 15 min on the first day
+    expect([0, 2, 5, 6, 7, 8, 9].map((n) => app.state.planned[day(n)].p1)).toEqual([90, 75, 75, 75, 75, 75, 75]);
+  });
+
+  it('never plans more than 12 h on a day, and leaves the rest unplanned', () => {
+    app = loadApp({ saved: saved({ plans: [plan({ needMin: 6000, deadline: day(2) })] }) });
+    expect(app.run(`autoFillPlan(planById('p1'))`)).toBe(3 * 720);
+  });
+
+  it('does nothing for a plan that is already fully planned', () => {
+    app = loadApp({ saved: saved({ plans: [plan({ needMin: 60 })], planned: { [day(1)]: { p1: 60 } } }) });
+    expect(app.run(`autoFillPlan(planById('p1'))`)).toBe(0);
+  });
+
+  it('fills a new plan right away when the box is ticked, and not when it is unticked', () => {
+    const create = (autoFill) => {
+      openPlanner(saved());
+      app.$('newPlanBtn').click();
+      app.$('planName').value = 'Exam';
+      app.$('planSubjects').querySelector('[data-subject="s1"]').click();
+      app.$('planDeadline').value = day(10);
+      app.$('planHours').value = '10';
+      app.$('planAutoFill').checked = autoFill;
+      submit(app.$('planForm'));
+      return app.saved().planned;
+    };
+    expect(Object.keys(create(true)).sort()).toEqual(weekdays);
+    app.close();
+    expect(create(false)).toEqual({});
+  });
+
+  it('fills every short plan from the Planner and says how much it added', () => {
+    openPlanner(saved({ plans: [plan(), plan({ id: 'p2', subjectId: 's2', needMin: 60, deadline: day(2) }), plan({ id: 'old', subjectId: 's2', deadline: day(-1) })] }));
+    expect(app.$('autoFillBtn').disabled).toBe(false);
+    app.$('autoFillBtn').click();
+    expect(app.$('autoFillStatus').textContent).toBe('Added 11h to 2 plans. Change any day with − / +.');
+    // p2: 60 min over Wed–Fri is 30 + 15 + 15
+    expect([0, 1, 2].map((n) => app.saved().planned[day(n)].p2)).toEqual([30, 15, 15]);
+    expect(app.saved().planned[day(0)].p1).toBe(75);
+    expect(app.$('autoFillBtn').disabled).toBe(true); // nothing left to fill
+  });
+});
+
 describe('deleting', () => {
   it('deletes a plan and the hours planned for it, after asking', async () => {
     openPlanner(saved({ plans: [plan(), plan({ id: 'p2', subjectId: 's2' })], planned: { [day(1)]: { p1: 60, p2: 30 }, [day(2)]: { p1: 45 } } }));

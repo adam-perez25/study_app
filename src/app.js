@@ -1663,6 +1663,30 @@ function planPlanned(plan, planned = state.planned) {
   return Object.values(planned).reduce((a, day) => a + (day[plan.id] || 0), 0);
 }
 
+// Spreads a plan's unplanned minutes over the free weekdays from today (or the day it was made) to its
+// deadline, evenly and in 15-minute steps. A weekday is free when this plan has nothing on it yet; other
+// plans can share the day. Returns the minutes added; whatever doesn't fit (12 h a day at most) stays unplanned.
+function autoFillPlan(plan, planned = state.planned, today = todayKey()) {
+  let left = plan.needMin - planPlanned(plan, planned);
+  if (left <= 0) return 0;
+  const days = [];
+  for (let k = today > plan.created ? today : plan.created; k <= plan.deadline; k = keyAdd(k, 1)) {
+    const weekday = (parseKey(k).getDay() + 6) % 7;
+    if (weekday < 5 && !planned[k]?.[plan.id]) days.push(k);
+  }
+  if (!days.length) return 0;
+  // Share out 15-minute pieces: every day gets the same, and the first days get one more if it doesn't divide.
+  const pieces = Math.ceil(left / 15), each = Math.floor(pieces / days.length), extra = pieces % days.length;
+  let added = 0;
+  days.forEach((k, i) => {
+    const min = Math.min(720, (each + (i < extra ? 1 : 0)) * 15);
+    if (!min) return;
+    (planned[k] ??= {})[plan.id] = min;
+    added += min;
+  });
+  return added;
+}
+
 // Removes a plan and every hour planned for it.
 function removePlan(id) {
   state.plans = state.plans.filter((p) => p.id !== id);
@@ -1696,6 +1720,7 @@ function renderPlanList() {
       `<span class="pl-num">${fmtShort(studied)} studied of ${fmtShort(p.needMin)} · ${fmtShort(planned)} planned</span>${status}`;
     el.appendChild(card);
   }
+  $('autoFillBtn').disabled = !state.plans.some((p) => p.deadline >= today && planPlanned(p) < p.needMin);
   const focused = planById(planner.focus);
   $('deletePlanBtn').hidden = !focused;
   if (focused) $('deletePlanBtn').textContent = `Delete “${focused.name}”`;
@@ -1780,6 +1805,7 @@ function renderPlanner() {
     const d = parseKey(planner.selected);
     planner.month = { year: d.getFullYear(), month: d.getMonth() };
   }
+  $('autoFillStatus').textContent = ''; // only right after Auto-fill
   renderPlanList();
   renderCalendar();
   renderDayPanel();
@@ -1869,6 +1895,7 @@ function openPlanForm() {
   $('planDeadline').min = todayKey();
   $('planDeadline').value = keyAdd(todayKey(), 14);
   $('planHours').value = 10;
+  $('planAutoFill').checked = true;
   $('planError').textContent = '';
   renderPlanFormChoices();
   $('planDialog').showModal();
@@ -1889,6 +1916,7 @@ function savePlanForm(e) {
   if (error) return;
   const plan = { id: `p${Date.now()}`, name, type: planFormType, subjectId: planFormSubject, created: today, deadline, needMin: Math.round(hours * 60) };
   state.plans.push(plan);
+  if ($('planAutoFill').checked) autoFillPlan(plan);
   save();
   $('planDialog').close();
   planner.focus = plan.id;
@@ -1937,6 +1965,20 @@ function initPlanner() {
     setPlanned(planner.selected, e.target.value, 60); // starts at 1 h; adjust with − / +
     save();
     renderPlanner();
+  });
+  $('autoFillBtn').addEventListener('click', () => {
+    const today = todayKey();
+    let added = 0, plans = 0;
+    for (const p of state.plans) {
+      if (p.deadline < today) continue;
+      const min = autoFillPlan(p);
+      if (min) { added += min; plans++; }
+    }
+    save();
+    renderPlanner();
+    $('autoFillStatus').textContent = added
+      ? `Added ${fmtShort(added)} to ${plans} plan${plans === 1 ? '' : 's'}. Change any day with − / +.`
+      : 'There were no free weekdays left before the deadlines.';
   });
   $('deletePlanBtn').addEventListener('click', async () => {
     const p = planById(planner.focus);
