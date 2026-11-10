@@ -127,6 +127,19 @@ describe('new plan popup', () => {
     expect(app.$('planDialog').open).toBe(true);
   });
 
+  it('offers Exam, Project and Practical, and saves a Practical', () => {
+    openPlanner(saved());
+    app.$('newPlanBtn').click();
+    expect([...app.$('planType').querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Exam', 'Project', 'Practical']);
+    app.$('planName').value = 'Lab practical 2';
+    app.$('planType').querySelector('[data-type="Practical"]').click();
+    expect(app.$('planType').querySelector('.active').dataset.type).toBe('Practical');
+    app.$('planSubjects').querySelector('[data-subject="s2"]').click();
+    submit(app.$('planForm'));
+    expect(app.saved().plans[0].type).toBe('Practical');
+    expect(app.$('planList').textContent).toContain('Practical · Physics');
+  });
+
   it('lets a subject have an exam and a project at the same time', () => {
     openPlanner(saved({ plans: [plan()] }));
     app.$('newPlanBtn').click();
@@ -158,14 +171,39 @@ describe('hours per day', () => {
   const dayCell = (k) => app.$('calendar').querySelector(`[data-day="${k}"]`);
   const change = (el) => el.dispatchEvent(new app.window.Event('change', { bubbles: true }));
 
-  it('rounds planned time to 15-minute steps between 0 and 12 h', () => {
+  it('keeps the exact minutes, between 0 and 12 h', () => {
     app = loadApp({ saved: saved({ plans: [plan()] }) });
     app.run(`setPlanned('${day(1)}', 'p1', 50)`);
-    expect(app.state.planned[day(1)].p1).toBe(45);
+    expect(app.state.planned[day(1)].p1).toBe(50);
     app.run(`setPlanned('${day(1)}', 'p1', 2000)`);
     expect(app.state.planned[day(1)].p1).toBe(720);
     app.run(`setPlanned('${day(1)}', 'p1', 0)`);
     expect(app.state.planned[day(1)]).toBeUndefined(); // an empty day is removed
+  });
+
+  it('lets you type the hours and minutes', () => {
+    openPlanner(saved({ plans: [plan()], planned: { [day(0)]: { p1: 60 } } }));
+    const set = (cls, value) => {
+      const input = app.$('dayPanel').querySelector(cls);
+      input.value = value;
+      input.dispatchEvent(new app.window.Event('change', { bubbles: true }));
+    };
+    expect(app.$('dayPanel').querySelector('.d-h').value).toBe('1');
+    expect(app.$('dayPanel').querySelector('.d-m').value).toBe('0');
+    set('.d-m', '20');
+    expect(app.saved().planned[day(0)].p1).toBe(80); // 1 h 20, exactly as typed
+    set('.d-h', '0');
+    expect(app.saved().planned[day(0)].p1).toBe(20);
+    set('.d-m', '90');
+    expect(app.saved().planned[day(0)].p1).toBe(90);
+    expect(app.$('dayPanel').querySelector('.d-h').value).toBe('1'); // shown as 1 h 30
+    expect(app.$('dayPanel').querySelector('.d-m').value).toBe('30');
+    app.$('dayPanel').querySelector('[data-step="15"]').click(); // − / + still move 15 minutes
+    expect(app.saved().planned[day(0)].p1).toBe(105);
+    set('.d-h', '20');
+    expect(app.saved().planned[day(0)].p1).toBe(720); // 12 h at most
+    set('.d-h', '0'); // 0 h 0 min
+    expect(app.saved().planned).toEqual({}); // 0 takes the plan off the day
   });
 
   it('adds a plan to the selected day, then changes it in 15-minute steps', () => {

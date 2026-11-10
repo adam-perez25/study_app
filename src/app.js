@@ -27,7 +27,7 @@ state.settings.sound.chime ??= 'bells';
 state.settings.sound.volume ??= 0.7;
 state.settings.sound.muted ??= false;
 state.settings.noBreaks ??= false; // on: the whole session is one focus block, with no breaks
-state.plans ??= [];   // { id, name, type: 'Exam' | 'Project', subjectId, created, deadline: 'YYYY-MM-DD', needMin }
+state.plans ??= [];   // { id, name, type: 'Exam' | 'Project' | 'Practical', subjectId, created, deadline: 'YYYY-MM-DD', needMin }
 state.planned ??= {}; // { 'YYYY-MM-DD': { planId: minutes planned that day } }
 state.planHistory ??= {}; // { 'YYYY-MM-DD': { planId: focused ms } }: the sessions you did for each plan
 state.settings.planId ??= null; // plan the next session counts toward: a plan id, 'none', or null to pick one automatically
@@ -1665,9 +1665,10 @@ function plannedOn(k) {
     .map(([id, min]) => ({ plan: planById(id), min }));
 }
 
-// Sets the minutes of a plan on a day, in 15-minute steps from 0 to 12 h. 0 takes the plan off that day.
+// Sets the minutes of a plan on a day, from 0 to 12 h (typed exactly; − / + move it 15 minutes).
+// 0 takes the plan off that day.
 function setPlanned(k, id, min) {
-  min = Math.max(0, Math.min(720, Math.round(min / 15) * 15));
+  min = Math.max(0, Math.min(720, Math.round(min) || 0));
   const day = (state.planned[k] ??= {});
   if (min) day[id] = min;
   else delete day[id];
@@ -1808,7 +1809,10 @@ function renderDayPanel() {
     // Days before today can't be planned any more, so they only show what was planned.
     const amount = past ? `<b class="d-min">${fmtShort(min)}</b>`
       : `<span class="stepper"><button data-step="-15" data-plan="${plan.id}" aria-label="15 minutes less of ${name}">−</button>` +
-        `<b>${fmtShort(min)}</b><button data-step="15" data-plan="${plan.id}" aria-label="15 minutes more of ${name}">+</button></span>`;
+        // Or type the time: hours and minutes, saved when you leave the box or press Enter.
+        `<label class="d-time"><input type="number" class="d-h" data-plan="${plan.id}" min="0" max="12" value="${Math.floor(min / 60)}" aria-label="Hours of ${name}"> h</label>` +
+        `<label class="d-time"><input type="number" class="d-m" data-plan="${plan.id}" min="0" max="59" step="5" value="${min % 60}" aria-label="Minutes of ${name}"> min</label>` +
+        `<button data-step="15" data-plan="${plan.id}" aria-label="15 minutes more of ${name}">+</button></span>`;
     html += `<div class="d-row"><span class="nm"><span class="dot" style="background:${subjectColor(plan.subjectId)}"></span>${name}</span>` +
       `${amount}<span class="st">${dayStudiedText(plan, k)}</span></div>`;
   }
@@ -2032,8 +2036,13 @@ function initPlanner() {
     renderPlanner();
   });
   $('dayPanel').addEventListener('change', (e) => {
-    if (e.target.id !== 'dayAdd' || !e.target.value) return;
-    setPlanned(planner.selected, e.target.value, 60); // starts at 1 h; adjust with − / +
+    const t = e.target;
+    if (t.id === 'dayAdd' && t.value) {
+      setPlanned(planner.selected, t.value, 60); // starts at 1 h; type the time or use − / +
+    } else if (t.matches('.d-h, .d-m')) {
+      const row = t.closest('.d-row'), num = (sel) => Math.max(0, parseInt(row.querySelector(sel).value, 10) || 0);
+      setPlanned(planner.selected, t.dataset.plan, num('.d-h') * 60 + num('.d-m')); // 90 min is fine too: it becomes 1 h 30
+    } else return;
     save();
     renderPlanner();
   });

@@ -53,8 +53,8 @@ Study Timer (v0.2.0, package `study-timer`) is a pomodoro-style Windows desktop 
   - `subjects` [{id,name,color 0-7,hidden,deleted?}]. Deleting keeps the subject with `hidden` and `deleted` set, so its `history` stays under it and Stats shows "Name (deleted)" (`subjectName`). Skip `deleted` ones wherever subjects are listed for editing or matched by name.
   - `achievements` {id: ISO date}
   - `records` {tasksDone, earlyStarts, lateStarts, longestSessionMs}
-  - `plans` [{id,name,type 'Exam'|'Project',subjectId,created,deadline,needMin}]. A subject can have several active plans (deadline >= today). Progress comes only from `planHistory`.
-  - `planned` {'YYYY-MM-DD': {planId: minutes}}, 15-minute steps, at most 720 a day.
+  - `plans` [{id,name,type 'Exam'|'Project'|'Practical',subjectId,created,deadline,needMin}]. A subject can have several active plans (deadline >= today). Progress comes only from `planHistory`.
+  - `planned` {'YYYY-MM-DD': {planId: minutes}}, whole minutes (typed, or − / + in 15-minute steps; auto-fill uses 15-minute pieces), at most 720 a day.
   - `planHistory` {'YYYY-MM-DD': {planId: ms}}: focus time of sessions done for a plan, added by `creditFocus` next to `history` when `session.planId` is set. Reset stats clears it.
   - `settings.planId`: the "Counts toward" choice on the start screen, a plan id, `'none'`, or null (pick automatically). `currentPlanId()` resolves it; `startSession` stores it as `session.planId`. Changing subject sets it back to null.
 - Migration: new fields get `??=` defaults at app.js:13-34. Follow this pattern when adding fields.
