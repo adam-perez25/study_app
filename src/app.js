@@ -29,21 +29,11 @@ state.settings.sound.muted ??= false;
 state.settings.noBreaks ??= false; // on: the whole session is one focus block, with no breaks
 state.plans ??= [];   // { id, name, type: 'Exam' | 'Project', subjectId, created, deadline: 'YYYY-MM-DD', needMin }
 state.planned ??= {}; // { 'YYYY-MM-DD': { planId: minutes planned that day } }
-const needPlanBackfill = !state.planHistory;
 state.planHistory ??= {}; // { 'YYYY-MM-DD': { planId: focused ms } }: the sessions you did for each plan
 state.settings.planId ??= null; // plan the next session counts toward: a plan id, 'none', or null to pick one automatically
 // Days saved before subjects existed were plain totals; keep them as "no subject".
 for (const [k, v] of Object.entries(state.history)) {
   if (typeof v === 'number') state.history[k] = { none: v };
-}
-// Plans made before sessions were tied to a plan counted their subject's time (one plan per subject then).
-if (needPlanBackfill) {
-  for (const p of state.plans) {
-    for (const [k, day] of Object.entries(state.history)) {
-      if (k < p.created || k > p.deadline || !day[p.subjectId]) continue;
-      ((state.planHistory[k] ??= {})[p.id]) = day[p.subjectId];
-    }
-  }
 }
 
 function load() {
