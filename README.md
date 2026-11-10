@@ -79,3 +79,11 @@ The tests use [Vitest](https://vitest.dev/) and load `src/index.html` and `src/a
 
 - **See all levels and tiers:** right now the 📊 Stats screen only shows your current level. Add a way (for example, clicking the level badge) to see every level from Beginner to Transcendent, the hours each one needs, and the tier colour it belongs to (Bronze, Silver, Gold, Platinum, Diamond), with the ones you've reached marked and the hours left until the next one.
 - **Skip breaks:** add a "No breaks" option on the setup screen, before you start, so the whole session is one focus block with no short or long breaks. The chosen time is then all study time. It could be a checkbox next to the time picker (remembered in settings), and the plan preview should update to show a single focus block.
+- **Planner:** a new 📅 Plan screen (opened from the setup screen) to plan exams and projects over a calendar. Each plan has a name, a type (Exam or Project), a subject, a deadline and the hours needed. On a month calendar you choose how many hours of each plan to do on each day (15-minute steps, with "copy to next day" and "clear day"). Progress comes from the time you already study with that subject (`state.history`), so each plan shows hours studied, hours planned and a warning when the planned hours don't cover the hours needed. Suggested build order, one commit each on a `feature/planner` branch:
+  1. Plans list, plan form and an empty month calendar (`state.plans`).
+  2. Day panel that saves the hours per day (`state.planned`).
+  3. Progress bars and planned-versus-studied numbers from `history`.
+  4. A "Today's plan" card on the setup screen whose Start button fills in the time and subject.
+  5. Optional "Auto-fill" that spreads the missing hours over the free weekdays.
+
+  Decisions: one active plan per subject (so the same study time is never counted twice), and handle deleted subjects. Hours per day only, no time slots. Keep the split and progress maths in pure functions with tests, like `buildPlan`.
