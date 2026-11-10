@@ -160,6 +160,85 @@ describe('levels', () => {
   });
 });
 
+describe('all levels popup', () => {
+  const table = (min) => plain(app.window.levelTable(min));
+  const statuses = (rows) => rows.map((r) => r.status);
+
+  it('lists 20 levels with their hours and tiers', () => {
+    app = loadApp();
+    const rows = table(0);
+    expect(rows).toHaveLength(20);
+    expect(rows.map((r) => r.hours).slice(0, 5)).toEqual([0, 2, 6, 12, 20]);
+    expect(rows[19]).toMatchObject({ level: 20, title: 'Transcendent', tier: 'Diamond', hours: 380 });
+    expect(rows.map((r) => r.tier)).toEqual(['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond'].flatMap((t) => [t, t, t, t]));
+  });
+
+  it('marks level 1 as current with nothing studied', () => {
+    app = loadApp();
+    const rows = table(0);
+    expect(statuses(rows).slice(0, 3)).toEqual(['current', 'next', 'locked']);
+    expect(rows[1].toGo).toBe(120);
+    expect(rows[0].toGo).toBeUndefined();
+  });
+
+  it('works between levels and exactly on a threshold', () => {
+    app = loadApp();
+    let rows = table(9 * 60); // level 3 (6 h), 3 h to level 4 (12 h)
+    expect(statuses(rows).slice(0, 5)).toEqual(['reached', 'reached', 'current', 'next', 'locked']);
+    expect(rows[3].toGo).toBe(180);
+    rows = table(12 * 60); // exactly level 4
+    expect(statuses(rows).slice(0, 6)).toEqual(['reached', 'reached', 'reached', 'current', 'next', 'locked']);
+    expect(rows[4].toGo).toBe(8 * 60);
+  });
+
+  it('marks every level reached past level 20', () => {
+    app = loadApp();
+    expect(statuses(table(380 * 60)).slice(18)).toEqual(['reached', 'current']);
+    expect(statuses(table(500 * 60)).every((s) => s === 'reached')).toBe(true);
+  });
+
+  it('opens from the level card and closes with ✕', () => {
+    app = loadApp({ saved: withHistory({ [day(0)]: { none: 9 * 60 * MIN } }) });
+    app.run("show('stats')");
+    app.$('levelCard').click();
+    const dlg = app.$('levelsDialog');
+    expect(dlg.open).toBe(true);
+    expect(app.$('levelsSummary').textContent).toBe(
+      "You've studied 9 h in all, so you're level 3 · Learner. Every 4 levels the badge moves up a tier.");
+    expect(dlg.querySelectorAll('.lv-group')).toHaveLength(5);
+    expect(dlg.querySelectorAll('.lv')).toHaveLength(20);
+    expect(dlg.querySelector('.lv-group h3').textContent).toBe('Bronze · levels 1–4');
+    const row = (n) => dlg.querySelector(`[data-level="${n}"]`);
+    expect(row(1).querySelector('.h').textContent).toBe('Start');
+    expect(row(2).querySelector('.s').textContent).toBe('✓ Reached');
+    expect(row(3).classList.contains('cur')).toBe(true);
+    expect(row(3).querySelector('.s').textContent).toBe("You're here");
+    expect(row(4).querySelector('.s').textContent).toBe('3 h to go');
+    expect(row(5).querySelector('.s').textContent).toBe('');
+    expect(row(5).classList.contains('locked')).toBe(true);
+
+    app.$('levelsClose').click();
+    expect(dlg.open).toBe(false);
+  });
+
+  it('opens with Enter on the card, and only closes on clicks outside the box', () => {
+    app = loadApp();
+    app.run("show('stats')");
+    const { KeyboardEvent, MouseEvent } = app.window;
+    app.$('levelCard').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    const dlg = app.$('levelsDialog');
+    expect(dlg.open).toBe(true);
+
+    dlg.querySelector('.lv').click(); // inside
+    expect(dlg.open).toBe(true);
+    dlg.getBoundingClientRect = () => ({ left: 100, right: 500, top: 100, bottom: 600 });
+    dlg.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 300, clientY: 300 })); // padding, inside the box
+    expect(dlg.open).toBe(true);
+    dlg.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 20, clientY: 20 })); // backdrop
+    expect(dlg.open).toBe(false);
+  });
+});
+
 describe('subjects', () => {
   it('totals focused time per subject in a date range', () => {
     app = loadApp({ saved: withHistory({

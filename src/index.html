@@ -171,10 +171,11 @@
         </div>
       </div>
 
-      <div class="card" id="levelCard">
+      <div class="card" id="levelCard" role="button" tabindex="0" title="See all levels">
         <div class="goal-text"><strong id="levelName"></strong><span class="tier-badge" id="levelTier"></span></div>
         <div class="meter level"><div class="meter-fill" id="levelMeter"></div></div>
         <p class="summary" id="levelNext"></p>
+        <p class="level-more">See all levels ›</p>
       </div>
 
       <div class="card">
@@ -313,6 +314,20 @@
       <div class="confirm-buttons">
         <button id="confirmNo" class="primary" autofocus></button>
         <button id="confirmYes" class="danger"></button>
+      </div>
+    </dialog>
+
+    <!-- Every level and tier, opened from the level card on the Stats screen.
+         The header stays put and only the list scrolls, so ✕ is always in reach. -->
+    <dialog id="levelsDialog" class="confirm levels-dialog" aria-labelledby="levelsTitle">
+      <div class="dialog-head">
+        <h2 id="levelsTitle">All levels</h2>
+        <button id="levelsClose" aria-label="Close" title="Close (Esc)">✕</button>
+      </div>
+      <div class="levels-body">
+        <p class="summary" id="levelsSummary"></p>
+        <div id="levelsList"></div>
+        <p class="summary">After level 20 you keep levelling up, and the title stays Transcendent.</p>
       </div>
     </dialog>
 
