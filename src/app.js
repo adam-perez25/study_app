@@ -867,6 +867,19 @@ function levelInfo(totalMin) {
   };
 }
 
+// One row per level for the "All levels" popup. status is 'reached', 'current', 'next' or 'locked';
+// toGo (minutes) is only set on the next level. Past level 20 every row is 'reached'.
+function levelTable(totalMin) {
+  const cur = levelInfo(totalMin).level;
+  return LEVEL_TITLES.map((title, i) => {
+    const level = i + 1, hours = level * (level - 1);
+    const status = level < cur ? 'reached' : level === cur ? 'current' : level === cur + 1 ? 'next' : 'locked';
+    const row = { level, title, tier: LEVEL_TIERS[Math.floor(i / 4)], hours, status };
+    if (status === 'next') row.toGo = hours * 60 - totalMin;
+    return row;
+  });
+}
+
 function totalMinutes() { return Object.keys(state.history).reduce((a, k) => a + dayMs(k), 0) / 60000; }
 
 function renderTodayCard() {
@@ -1479,7 +1492,58 @@ function initShare() {
   });
 }
 
+// "All levels" popup: every level grouped by tier, with what you reached and what's next.
+const LEVEL_ROW_CLASS = { reached: 'got', current: 'got cur', next: 'locked next', locked: 'locked' };
+function renderLevels() {
+  const total = totalMinutes(), info = levelInfo(total), rows = levelTable(total);
+  $('levelsSummary').textContent = `You've studied ${fmtDuration(total)} in all, so you're level ${info.level} · ${info.title}. ` +
+    'Every 4 levels the badge moves up a tier.';
+  const status = (r) => r.status === 'reached' ? '✓ Reached'
+    : r.status === 'current' ? "You're here"
+    : r.status === 'next' ? `${fmtDuration(r.toGo)} to go` : '';
+  $('levelsList').innerHTML = LEVEL_TIERS.map((tier) => {
+    const group = rows.filter((r) => r.tier === tier);
+    const html = group.map((r) => `<div class="lv ${LEVEL_ROW_CLASS[r.status]}" data-level="${r.level}">` +
+      `<span class="n">${r.level}</span><span class="t">${r.title}</span>` +
+      `<span class="h">${r.hours ? `${r.hours} h` : 'Start'}</span><span class="s">${status(r)}</span></div>`).join('');
+    return `<div class="lv-group" data-tier="${tier.toLowerCase()}">` +
+      `<h3><i class="sw"></i>${tier} · levels ${group[0].level}–${group[group.length - 1].level}</h3>${html}</div>`;
+  }).join('');
+}
+
+function openLevels() {
+  const dlg = $('levelsDialog');
+  if (dlg.open) return;
+  renderLevels();
+  dlg.showModal();
+  dlg.querySelector('.lv.cur, .lv.next')?.scrollIntoView?.({ block: 'center' });
+}
+
+function initLevels() {
+  const card = $('levelCard'), dlg = $('levelsDialog');
+  card.addEventListener('click', openLevels);
+  card.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    e.stopPropagation(); // Space would otherwise also pause a running session
+    openLevels();
+  });
+  $('levelsClose').addEventListener('click', () => dlg.close());
+  // A click on the backdrop lands on the <dialog> itself, so only close when it's outside the box.
+  // The press must start there too, so dragging a text selection out of the popup doesn't close it.
+  let pressedOnBackdrop = false;
+  dlg.addEventListener('mousedown', (e) => { pressedOnBackdrop = e.target === dlg; });
+  dlg.addEventListener('click', (e) => {
+    if (e.target !== dlg || !pressedOnBackdrop) return;
+    const r = dlg.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
+  });
+  // Keys pressed in the popup (Space on ✕, Esc) shouldn't also pause the session or leave full screen.
+  dlg.addEventListener('keydown', (e) => e.stopPropagation());
+}
+
 function initStats() {
+  initLevels();
   document.querySelectorAll('#subjectPeriod button').forEach((b) => {
     b.addEventListener('click', () => {
       subjectPeriod = b.dataset.period;
