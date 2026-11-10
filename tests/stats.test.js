@@ -286,18 +286,38 @@ describe('subjects', () => {
     expect(app.state.settings.subjectId).toBe('m');
   });
 
-  it('deleting a subject moves its time to "No subject" and keeps the totals', async () => {
-    app = loadApp({ saved: withHistory(
-      { [day(-1)]: { math: 30 * MIN, none: 5 * MIN }, [day(0)]: { math: 10 * MIN } },
-      { subjects: [{ id: 'math', name: 'Maths', color: 0, hidden: false }],
-        settings: { ...BASE_SETTINGS, subjectId: 'math' } },
-    ) });
+  it('deleting a subject keeps its time under its name, marked as deleted', async () => {
+    const history = { [day(-1)]: { math: 30 * MIN, none: 5 * MIN }, [day(0)]: { math: 10 * MIN } };
+    app = loadApp({ saved: withHistory(history, {
+      subjects: [{ id: 'math', name: 'Maths', color: 0, hidden: false }, { id: 'phy', name: 'Physics', color: 1, hidden: false }],
+      settings: { ...BASE_SETTINGS, subjectId: 'math' },
+    }) });
     const done = app.run('deleteSubject(state.subjects[0])');
+    expect(app.$('confirmText').textContent).toContain('shows in 📊 Stats as “Maths (deleted)”');
     app.$('confirmYes').click();
     await done;
-    expect(plain(app.state.history)).toEqual({ [day(-1)]: { none: 35 * MIN }, [day(0)]: { none: 10 * MIN } });
-    expect(app.state.subjects).toHaveLength(0);
+    expect(plain(app.state.history)).toEqual(history); // nothing moves to "No subject"
+    expect(plain(app.state.subjects[0])).toEqual({ id: 'math', name: 'Maths', color: 0, hidden: true, deleted: true });
     expect(app.state.settings.subjectId).toBeNull();
+    // Gone from the start screen and Settings…
+    expect(app.$('subjectPicker').textContent).not.toContain('Maths');
+    app.run('renderSubjectEdit()');
+    expect(app.$('subjectEditList').querySelectorAll('li')).toHaveLength(1);
+    // …but still in Stats, with its time, and the totals don't change.
+    app.$('statsBtn').click();
+    app.$('subjectPeriod').querySelector('[data-period="all"]').click();
+    expect(app.$('subjectBars').textContent).toContain('Maths (deleted)');
+    expect(app.$('subjectBars').textContent).toContain('Maths (deleted)40m');
+    expect(app.run('totalMinutes()')).toBe(45);
+  });
+
+  it('adding a subject with the name of a deleted one starts a new subject', () => {
+    app = loadApp({ saved: withHistory({}, { subjects: [{ id: 'math', name: 'Maths', color: 0, hidden: true, deleted: true }] }) });
+    app.$('subjectName').value = 'Maths';
+    app.$('subjectForm').dispatchEvent(new app.window.Event('submit', { cancelable: true }));
+    expect(app.state.subjects).toHaveLength(2);
+    expect(app.state.subjects[0].deleted).toBe(true);
+    expect(app.state.settings.subjectId).toBe(app.state.subjects[1].id);
   });
 
   it('cancelling the delete changes nothing', async () => {

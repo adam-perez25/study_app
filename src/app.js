@@ -16,7 +16,7 @@ state.sessionCount ??= 0;
 state.settings.dailyGoal ??= 60; // minutes
 state.settings.autoStartFocus ??= true; // off: after a break, the next focus block waits for "I'm back"
 state.settings.theme ??= 'system'; // 'system' (match Windows), 'light' or 'dark'
-state.subjects ??= [];       // { id, name, color (0–7, see --subj-N in styles.css), hidden }
+state.subjects ??= [];       // { id, name, color (0–7, see --subj-N in styles.css), hidden, deleted? } (deleted ones are also hidden)
 state.settings.subjectId ??= null; // last subject picked on the start screen
 state.sessionLog ??= [];     // 'YYYY-MM-DD' of each completed session (older sessions weren't logged)
 state.achievements ??= {};   // { achievementId: ISO date it was unlocked }
@@ -188,7 +188,11 @@ let newSubjectColor = 0;
 
 function subjectById(id) { return state.subjects.find((s) => s.id === id) || null; }
 function subjectColor(id) { const s = subjectById(id); return s ? `var(--subj-${s.color})` : 'var(--subj-none)'; }
-function subjectName(id) { return subjectById(id)?.name || 'No subject'; }
+// A deleted subject is kept (hidden, with deleted: true) so its time still shows under its name in Stats.
+function subjectName(id) {
+  const s = subjectById(id);
+  return !s ? 'No subject' : s.deleted ? `${s.name} (deleted)` : s.name;
+}
 
 // The picked subject, if it still exists and isn't hidden.
 function currentSubjectId() {
@@ -265,7 +269,8 @@ function initSubjects() {
     const name = $('subjectName').value.trim();
     if (!name) return $('subjectName').focus();
     // Same name as an existing subject: show it again and pick it instead of adding a duplicate.
-    let s = state.subjects.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    // A deleted subject stays deleted; the new one starts from zero.
+    let s = state.subjects.find((x) => !x.deleted && x.name.toLowerCase() === name.toLowerCase());
     if (s) s.hidden = false;
     else {
       s = { id: `s${Date.now()}`, name, color: newSubjectColor, hidden: false };
@@ -1088,11 +1093,12 @@ function renderSubjectStats(today) {
 function renderSubjectEdit() {
   const ul = $('subjectEditList');
   ul.innerHTML = '';
-  if (!state.subjects.length) {
+  const subjects = state.subjects.filter((s) => !s.deleted);
+  if (!subjects.length) {
     ul.innerHTML = '<li class="empty">No subjects yet. Add one below.</li>';
     return;
   }
-  for (const s of state.subjects) {
+  for (const s of subjects) {
     const li = document.createElement('li');
     li.classList.toggle('is-hidden', s.hidden);
     const color = document.createElement('button');
@@ -1126,20 +1132,21 @@ function renderSubjectEdit() {
     const del = document.createElement('button');
     del.className = 'danger';
     del.textContent = 'Delete';
-    del.title = 'Delete it for good (its time stays in your stats as “No subject”)';
+    del.title = 'Delete it for good (its time stays in your stats, marked as deleted)';
     del.addEventListener('click', () => deleteSubject(s));
     li.append(color, name, hide, del);
     ul.appendChild(li);
   }
 }
 
-// Removes a subject. The time studied for it moves to "No subject", so totals, streak and badges stay.
+// Deletes a subject from the start screen, Settings and the planner. Its time stays recorded under it, so
+// totals, streak and badges don't change and 📊 Stats shows it as "Name (deleted)". Its plans are deleted.
 async function deleteSubject(s) {
   const plans = state.plans.filter((p) => p.subjectId === s.id);
   const ok = await askConfirm({
     title: `Delete “${s.name}”?`,
-    text: 'The subject is removed everywhere. The time you studied for it stays in your stats as “No subject”. ' +
-      // A plan counts the time studied with its subject, so it can't outlive the subject.
+    text: 'The subject is removed from the start screen, Settings and the planner. The time you studied for it ' +
+      `still counts in your totals and shows in 📊 Stats as “${s.name} (deleted)”. ` +
       (plans.length ? `Its plan${plans.length === 1 ? '' : 's'} (${plans.map((p) => `“${p.name}”`).join(', ')}) ` +
         `${plans.length === 1 ? 'is' : 'are'} deleted too. ` : '') +
       'This can’t be undone.',
@@ -1147,12 +1154,8 @@ async function deleteSubject(s) {
     no: 'Cancel',
   });
   if (!ok) return;
-  for (const day of Object.values(state.history)) {
-    if (!day[s.id]) continue;
-    day.none = (day.none || 0) + day[s.id];
-    delete day[s.id];
-  }
-  state.subjects = state.subjects.filter((x) => x !== s);
+  s.hidden = true; // everything that skips hidden subjects now skips it too
+  s.deleted = true;
   for (const p of plans) removePlan(p.id);
   if (state.settings.subjectId === s.id) state.settings.subjectId = null;
   if (state.session?.subjectId === s.id) state.session.subjectId = null; // the rest of this session counts as "No subject"
@@ -2055,7 +2058,7 @@ function initSettings() {
     e.preventDefault();
     const name = $('settingsSubjectName').value.trim();
     if (!name) return $('settingsSubjectName').focus();
-    const existing = state.subjects.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    const existing = state.subjects.find((x) => !x.deleted && x.name.toLowerCase() === name.toLowerCase());
     if (existing) existing.hidden = false; // same name: show it again instead of adding a duplicate
     else state.subjects.push({ id: `s${Date.now()}`, name, color: nextFreeColor(), hidden: false });
     save();

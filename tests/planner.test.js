@@ -414,6 +414,6 @@ describe('deleting', () => {
     await Promise.resolve();
     expect(app.saved().plans).toEqual([]);
     expect(app.saved().planned).toEqual({});
-    expect(app.saved().history[day(-1)]).toEqual({ none: 30 * MIN }); // the time studied stays
+    expect(app.saved().history[day(-1)]).toEqual({ s1: 30 * MIN }); // the time studied stays, under the deleted subject
   });
 });
