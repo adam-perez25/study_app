@@ -44,9 +44,12 @@
           <label>Hours <input id="hours" type="number" min="0" max="12" value="1"></label>
           <label>Minutes <input id="minutes" type="number" min="0" max="59" step="5" value="0"></label>
         </div>
+        <label class="check"><input id="noBreaks" type="checkbox"> No breaks</label>
+        <p class="summary">The whole time is one focus block, with no short or long breaks.</p>
 
         <details class="advanced">
           <summary>Block settings</summary>
+          <p class="summary hidden" id="noBreaksNote">The break settings aren’t used while “No breaks” is on.</p>
           <div class="row">
             <label>Focus block (min) <input id="focusLen" type="number" min="5" max="120" value="25"></label>
             <label>Short break (min) <input id="shortLen" type="number" min="1" max="30" value="5"></label>
