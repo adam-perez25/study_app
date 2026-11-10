@@ -16,7 +16,7 @@ state.sessionCount ??= 0;
 state.settings.dailyGoal ??= 60; // minutes
 state.settings.autoStartFocus ??= true; // off: after a break, the next focus block waits for "I'm back"
 state.settings.theme ??= 'system'; // 'system' (match Windows), 'light' or 'dark'
-state.subjects ??= [];       // { id, name, color (0–7, see --subj-N in styles.css), hidden }
+state.subjects ??= [];       // { id, name, color (0–7, see --subj-N in styles.css), hidden, deleted? } (deleted ones are also hidden)
 state.settings.subjectId ??= null; // last subject picked on the start screen
 state.sessionLog ??= [];     // 'YYYY-MM-DD' of each completed session (older sessions weren't logged)
 state.achievements ??= {};   // { achievementId: ISO date it was unlocked }
@@ -27,6 +27,11 @@ state.settings.sound.chime ??= 'bells';
 state.settings.sound.volume ??= 0.7;
 state.settings.sound.muted ??= false;
 state.settings.noBreaks ??= false; // on: the whole session is one focus block, with no breaks
+state.plans ??= [];   // { id, name, type: 'Exam' | 'Project', subjectId, created, deadline: 'YYYY-MM-DD', needMin, auto?, pinned? }
+                      // auto: kept balanced (rebalancePlan); pinned: the days you set yourself
+state.planned ??= {}; // { 'YYYY-MM-DD': { planId: minutes planned that day } }
+state.planHistory ??= {}; // { 'YYYY-MM-DD': { planId: focused ms } }: the sessions you did for each plan
+state.settings.planId ??= null; // plan the next session counts toward: a plan id, 'none', or null to pick one automatically
 // Days saved before subjects existed were plain totals; keep them as "no subject".
 for (const [k, v] of Object.entries(state.history)) {
   if (typeof v === 'number') state.history[k] = { none: v };
@@ -141,6 +146,7 @@ function updatePreview() {
   document.querySelectorAll('#presets button').forEach((btn) => {
     btn.classList.toggle('active', Number(btn.dataset.min) === total);
   });
+  renderTodayPlan(); // its highlight follows the time picked here
 }
 
 function initSetup() {
@@ -185,7 +191,11 @@ let newSubjectColor = 0;
 
 function subjectById(id) { return state.subjects.find((s) => s.id === id) || null; }
 function subjectColor(id) { const s = subjectById(id); return s ? `var(--subj-${s.color})` : 'var(--subj-none)'; }
-function subjectName(id) { return subjectById(id)?.name || 'No subject'; }
+// A deleted subject is kept (hidden, with deleted: true) so its time still shows under its name in Stats.
+function subjectName(id) {
+  const s = subjectById(id);
+  return !s ? 'No subject' : s.deleted ? `${s.name} (deleted)` : s.name;
+}
 
 // The picked subject, if it still exists and isn't hidden.
 function currentSubjectId() {
@@ -213,6 +223,7 @@ function renderSubjectPicker() {
     chip.append(s.name);
     chip.addEventListener('click', () => {
       state.settings.subjectId = s.id === picked ? null : s.id; // click again to clear
+      state.settings.planId = null; // a new subject picks its plan automatically again
       save();
       renderSubjectPicker();
     });
@@ -229,6 +240,8 @@ function renderSubjectPicker() {
   $('subjectHint').hidden = hasSubjects;
   $('subjectHint').textContent = 'Optional. Add a subject to see how much time each one gets in your stats.';
   $('subjectPicker').title = picked ? 'Click the selected subject again to study without one' : '';
+  renderPlanPick(); // the plans of the subject picked here
+  renderTodayPlan(); // its highlight follows the subject picked here
 }
 
 function renderSwatches() {
@@ -261,13 +274,15 @@ function initSubjects() {
     const name = $('subjectName').value.trim();
     if (!name) return $('subjectName').focus();
     // Same name as an existing subject: show it again and pick it instead of adding a duplicate.
-    let s = state.subjects.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    // A deleted subject stays deleted; the new one starts from zero.
+    let s = state.subjects.find((x) => !x.deleted && x.name.toLowerCase() === name.toLowerCase());
     if (s) s.hidden = false;
     else {
       s = { id: `s${Date.now()}`, name, color: newSubjectColor, hidden: false };
       state.subjects.push(s);
     }
     state.settings.subjectId = s.id;
+    state.settings.planId = null;
     save();
     $('subjectForm').classList.add('hidden');
     renderSubjectPicker();
@@ -348,7 +363,7 @@ function renderTasks() {
 let tickHandle = null;
 const RING_LEN = 2 * Math.PI * 90;
 
-const SCREENS = ['setup', 'session', 'done', 'stats', 'settings'];
+const SCREENS = ['setup', 'session', 'done', 'stats', 'settings', 'planner'];
 function currentScreen() { return SCREENS.find((id) => !$(id).classList.contains('hidden')); }
 
 function show(screen) {
@@ -360,6 +375,7 @@ function show(screen) {
   if (screen === 'setup') { renderTodayCard(); renderSubjectPicker(); }
   if (screen === 'stats') renderStats();
   if (screen === 'settings') { renderSettings(); renderSound(); }
+  if (screen === 'planner') { rebalanceAll(); renderPlanner(); }
   window.scrollTo(0, 0);
 }
 
@@ -370,7 +386,7 @@ function setAccent(type) {
 function startSession() {
   const blocks = buildPlan(state.settings);
   if (!blocks.length) return;
-  state.session = { blocks, index: 0, endsAt: Date.now() + blocks[0].min * 60000, pausedRemaining: null, startedAt: Date.now(), focusedMs: 0, subjectId: currentSubjectId() };
+  state.session = { blocks, index: 0, endsAt: Date.now() + blocks[0].min * 60000, pausedRemaining: null, startedAt: Date.now(), focusedMs: 0, subjectId: currentSubjectId(), planId: currentPlanId() };
   save();
   requestNotificationPermission();
   unlockAudio();
@@ -389,9 +405,14 @@ function creditFocus(elapsedMs) {
   const s = state.session;
   if (s.blocks[s.index].type !== 'focus' || elapsedMs <= 0) return;
   s.focusedMs = (s.focusedMs || 0) + elapsedMs;
-  const day = (state.history[dayKey(new Date())] ??= {});
+  const k = dayKey(new Date());
+  const day = (state.history[k] ??= {});
   const sid = s.subjectId || 'none';
   day[sid] = (day[sid] || 0) + elapsedMs;
+  if (s.planId) { // the session counts toward a plan in the Planner
+    const planDay = (state.planHistory[k] ??= {});
+    planDay[s.planId] = (planDay[s.planId] || 0) + elapsedMs;
+  }
 }
 
 function elapsedInBlock() {
@@ -453,10 +474,12 @@ function tick() {
 
   const pill = $('subjectPill');
   pill.hidden = !s.subjectId;
-  if (s.subjectId && pill.dataset.id !== s.subjectId) {
-    pill.dataset.id = s.subjectId;
+  const pillKey = `${s.subjectId}|${s.planId || ''}`;
+  if (s.subjectId && pill.dataset.id !== pillKey) {
+    pill.dataset.id = pillKey;
     pill.innerHTML = `<span class="dot" style="background:${subjectColor(s.subjectId)}"></span>`;
-    pill.append(subjectName(s.subjectId));
+    const plan = s.planId && planById(s.planId);
+    pill.append(subjectName(s.subjectId) + (plan ? ` · ${plan.name}` : '')); // the plan this session counts toward
   }
 
   const laterMs = s.blocks.slice(s.index + 1).reduce((a, b) => a + b.min * 60000, 0);
@@ -639,6 +662,26 @@ function askConfirm({ title, text, yes, no }) {
     dlg.onclose = () => done(false); // Esc
     dlg.showModal();
   });
+}
+
+// Closes a popup when you click outside it. A click on the backdrop lands on the <dialog> itself,
+// so it only closes when the click is outside the box. The press must start there too, so dragging
+// a text selection out of the popup doesn't close it.
+function closeOnBackdropClick(dlg) {
+  let pressedOnBackdrop = false;
+  dlg.addEventListener('mousedown', (e) => { pressedOnBackdrop = e.target === dlg; });
+  dlg.addEventListener('click', (e) => {
+    if (e.target !== dlg || !pressedOnBackdrop) return;
+    const r = dlg.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
+  });
+  // Keys pressed in the popup (Space on a button, Esc) shouldn't also pause the session or leave full screen.
+  dlg.addEventListener('keydown', (e) => e.stopPropagation());
+}
+
+// Text typed by the user, made safe to put inside HTML.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 // Closing the window during a session (asked by the desktop app).
@@ -1063,11 +1106,12 @@ function renderSubjectStats(today) {
 function renderSubjectEdit() {
   const ul = $('subjectEditList');
   ul.innerHTML = '';
-  if (!state.subjects.length) {
+  const subjects = state.subjects.filter((s) => !s.deleted);
+  if (!subjects.length) {
     ul.innerHTML = '<li class="empty">No subjects yet. Add one below.</li>';
     return;
   }
-  for (const s of state.subjects) {
+  for (const s of subjects) {
     const li = document.createElement('li');
     li.classList.toggle('is-hidden', s.hidden);
     const color = document.createElement('button');
@@ -1101,29 +1145,31 @@ function renderSubjectEdit() {
     const del = document.createElement('button');
     del.className = 'danger';
     del.textContent = 'Delete';
-    del.title = 'Delete it for good (its time stays in your stats as “No subject”)';
+    del.title = 'Delete it for good (its time stays in your stats, marked as deleted)';
     del.addEventListener('click', () => deleteSubject(s));
     li.append(color, name, hide, del);
     ul.appendChild(li);
   }
 }
 
-// Removes a subject. The time studied for it moves to "No subject", so totals, streak and badges stay.
+// Deletes a subject from the start screen, Settings and the planner. Its time stays recorded under it, so
+// totals, streak and badges don't change and 📊 Stats shows it as "Name (deleted)". Its plans are deleted.
 async function deleteSubject(s) {
+  const plans = state.plans.filter((p) => p.subjectId === s.id);
   const ok = await askConfirm({
     title: `Delete “${s.name}”?`,
-    text: 'The subject is removed everywhere. The time you studied for it stays in your stats as “No subject”. ' +
+    text: 'The subject is removed from the start screen, Settings and the planner. The time you studied for it ' +
+      `still counts in your totals and shows in 📊 Stats as “${s.name} (deleted)”. ` +
+      (plans.length ? `Its plan${plans.length === 1 ? '' : 's'} (${plans.map((p) => `“${p.name}”`).join(', ')}) ` +
+        `${plans.length === 1 ? 'is' : 'are'} deleted too. ` : '') +
       'This can’t be undone.',
     yes: 'Delete subject',
     no: 'Cancel',
   });
   if (!ok) return;
-  for (const day of Object.values(state.history)) {
-    if (!day[s.id]) continue;
-    day.none = (day.none || 0) + day[s.id];
-    delete day[s.id];
-  }
-  state.subjects = state.subjects.filter((x) => x !== s);
+  s.hidden = true; // everything that skips hidden subjects now skips it too
+  s.deleted = true;
+  for (const p of plans) removePlan(p.id);
   if (state.settings.subjectId === s.id) state.settings.subjectId = null;
   if (state.session?.subjectId === s.id) state.session.subjectId = null; // the rest of this session counts as "No subject"
   save();
@@ -1529,17 +1575,7 @@ function initLevels() {
     openLevels();
   });
   $('levelsClose').addEventListener('click', () => dlg.close());
-  // A click on the backdrop lands on the <dialog> itself, so only close when it's outside the box.
-  // The press must start there too, so dragging a text selection out of the popup doesn't close it.
-  let pressedOnBackdrop = false;
-  dlg.addEventListener('mousedown', (e) => { pressedOnBackdrop = e.target === dlg; });
-  dlg.addEventListener('click', (e) => {
-    if (e.target !== dlg || !pressedOnBackdrop) return;
-    const r = dlg.getBoundingClientRect();
-    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
-  });
-  // Keys pressed in the popup (Space on ✕, Esc) shouldn't also pause the session or leave full screen.
-  dlg.addEventListener('keydown', (e) => e.stopPropagation());
+  closeOnBackdropClick(dlg);
 }
 
 function initStats() {
@@ -1571,6 +1607,607 @@ function initStats() {
     tip.style.left = `${left}px`;
     tip.style.top = `${r.top - tip.offsetHeight - 8}px`;
   });
+}
+
+// ---------- Planner ----------
+
+// Plans for exams and projects. A subject can have several (an exam and a project, say). Each session counts
+// toward the plan picked under "Counts toward" on the start screen, or toward none, and a plan's progress is
+// only the sessions done for it (state.planHistory), so no study time ever counts twice.
+const planner = { month: null, selected: null, focus: null }; // what the Planner screen shows; not saved
+let planFormType = 'Exam', planFormSubject = null;
+
+function todayKey() { return dayKey(new Date()); }
+function keyAdd(k, n) { return dayKey(addDays(parseKey(k), n)); }
+function daysBetween(a, b) { return Math.round((parseKey(b) - parseKey(a)) / 864e5); }
+function fmtDayShort(k) { return parseKey(k).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' }); }
+function fmtDayLong(k) { return parseKey(k).toLocaleDateString(LOCALE, { weekday: 'long', day: 'numeric', month: 'long' }); }
+
+// Day keys for the whole weeks (Monday first) that cover a month (0–11).
+function monthGrid(year, month) {
+  const first = new Date(year, month, 1), offset = (first.getDay() + 6) % 7;
+  const weeks = Math.ceil((offset + new Date(year, month + 1, 0).getDate()) / 7);
+  return Array.from({ length: weeks * 7 }, (_, i) => dayKey(addDays(first, i - offset)));
+}
+
+// A subject's plans that are still running (deadline today or later), soonest deadline first.
+function activePlans(subjectId, plans = state.plans, today = todayKey()) {
+  return plans.filter((p) => p.subjectId === subjectId && p.deadline >= today)
+    .sort((a, b) => a.deadline.localeCompare(b.deadline));
+}
+
+// The plan picked for you: the one with the most time planned for today, otherwise the soonest deadline.
+function defaultPlan(plans, planned = state.planned, today = todayKey()) {
+  const todays = planned[today] || {};
+  return [...plans].sort((a, b) => (todays[b.id] || 0) - (todays[a.id] || 0))[0] || null;
+}
+
+// The plan the next session counts toward: what you picked under "Counts toward" if it still fits the
+// subject, "No plan" (null) if you chose that, or the automatic pick.
+function currentPlanId() {
+  const plans = activePlans(currentSubjectId());
+  if (!plans.length || state.settings.planId === 'none') return null;
+  if (plans.some((p) => p.id === state.settings.planId)) return state.settings.planId;
+  return defaultPlan(plans).id;
+}
+function planById(id) { return state.plans.find((p) => p.id === id) || null; }
+
+// Compact time for calendar cells: 90 → "1:30", 60 → "1h", 45 → "45m".
+function fmtHM(min) {
+  min = Math.round(min);
+  const h = Math.floor(min / 60), m = min % 60;
+  return h && m ? `${h}:${pad(m)}` : h ? `${h}h` : `${m}m`;
+}
+
+// The plans planned on a day, with their minutes, in the order of the plans list (plans that no longer exist
+// are skipped). The same order every day, so the calendar's pills line up.
+function plannedOn(k) {
+  const day = state.planned[k] || {};
+  return state.plans.filter((p) => day[p.id] > 0).map((plan) => ({ plan, min: day[plan.id] }));
+}
+
+// Sets the minutes of a plan on a day, from 0 to 12 h (typed exactly; − / + move it 15 minutes).
+// 0 takes the plan off that day.
+function setPlanned(k, id, min) {
+  min = Math.max(0, Math.min(720, Math.round(min) || 0));
+  const day = (state.planned[k] ??= {});
+  if (min) day[id] = min;
+  else delete day[id];
+  if (!Object.keys(day).length) delete state.planned[k];
+}
+
+// Reads a typed study time as minutes: "1:30", "90", "90m", "1h 30", "1h30m", "1.5h". null if it isn't one.
+function parseDuration(text) {
+  const t = String(text).trim().toLowerCase().replace(',', '.');
+  let m = t.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (m) return Number(m[1]) * 60 + Number(m[2]);
+  m = t.match(/^(?:(\d+(?:\.\d+)?)\s*h)?\s*(?:(\d+)\s*(?:m|min|mins)?)?$/);
+  if (!m || (!m[1] && !m[2])) return null;
+  return Math.round((m[1] ? parseFloat(m[1]) * 60 : 0) + (m[2] ? Number(m[2]) : 0));
+}
+
+// Makes the next day the same as this one (plans already past their deadline by then are left out).
+// Both days count as set by hand, so they're pinned before the plans rebalance.
+function copyDayToNext(k) {
+  const next = keyAdd(k, 1), today = todayKey(), plans = [];
+  const ids = new Set([...Object.keys(state.planned[k] || {}), ...Object.keys(state.planned[next] || {})]);
+  for (const id of ids) {
+    const plan = planById(id);
+    if (!plan) continue;
+    setPlanned(next, id, plan.deadline >= next ? state.planned[k]?.[id] || 0 : 0);
+    pinDay(plan, next);
+    if (k >= today) pinDay(plan, k);
+    plans.push(plan);
+  }
+  for (const p of plans) rebalancePlan(p);
+  return next;
+}
+
+// Minutes studied toward a plan on a day: the sessions that counted toward it.
+function planStudiedOn(plan, k, planHistory = state.planHistory) {
+  return (planHistory[k]?.[plan.id] || 0) / 60000;
+}
+function planStudied(plan, planHistory = state.planHistory) {
+  return Object.keys(planHistory).reduce((a, k) => a + planStudiedOn(plan, k, planHistory), 0);
+}
+function planPlanned(plan, planned = state.planned) {
+  return Object.values(planned).reduce((a, day) => a + (day[plan.id] || 0), 0);
+}
+
+// Spreads a plan's unplanned minutes over the free weekdays from today (or the day it was made) to its
+// deadline, evenly and in 15-minute steps. A weekday is free when this plan has nothing on it yet; other
+// plans can share the day. Returns the minutes added; whatever doesn't fit (12 h a day at most) stays unplanned.
+function isPinned(plan, k) { return (plan.pinned || []).includes(k); }
+function pinDay(plan, k) { if (plan.auto && !isPinned(plan, k)) (plan.pinned ??= []).push(k); }
+function unpinDay(plan, k) { plan.pinned = (plan.pinned || []).filter((d) => d !== k); }
+
+// What you studied for a plan before today, and what's planned for it from today on.
+function studiedBefore(plan, today = todayKey(), planHistory = state.planHistory) {
+  return Object.keys(planHistory).filter((k) => k < today).reduce((a, k) => a + planStudiedOn(plan, k, planHistory), 0);
+}
+function plannedFrom(plan, today = todayKey(), planned = state.planned) {
+  return Object.entries(planned).filter(([k]) => k >= today).reduce((a, [, day]) => a + (day[plan.id] || 0), 0);
+}
+// The time a plan still needs that isn't planned on today or a later day (below 0: more than it needs).
+function planMissing(plan, today = todayKey()) {
+  return plan.needMin - studiedBefore(plan, today) - plannedFrom(plan, today);
+}
+
+// Keeps a plan balanced (only plans with auto: true). The days you set yourself are pinned and keep their time;
+// the other weekdays from today to the deadline share what's still needed (hours needed minus what you studied
+// before today, minus the pinned days), evenly in 15-minute pieces and at most 12 h a day. So putting more on
+// one day leaves less for the others, and a day you skip or cut short moves to the days left.
+// Returns true if any day changed.
+function rebalancePlan(plan, today = todayKey(), planned = state.planned, planHistory = state.planHistory) {
+  if (!plan.auto || plan.deadline < today) return false;
+  const snapshot = () => JSON.stringify(Object.keys(planned).filter((k) => k >= today && planned[k][plan.id])
+    .sort().map((k) => [k, planned[k][plan.id]]));
+  const before = snapshot();
+  let left = plan.needMin - studiedBefore(plan, today, planHistory);
+  for (const [k, day] of Object.entries(planned)) {
+    if (k < today || !(plan.id in day)) continue;
+    if (isPinned(plan, k)) left -= day[plan.id];
+    else { delete day[plan.id]; if (!Object.keys(day).length) delete planned[k]; } // worked out again below
+  }
+  const days = [];
+  for (let k = today > plan.created ? today : plan.created; k <= plan.deadline; k = keyAdd(k, 1)) {
+    if ((parseKey(k).getDay() + 6) % 7 < 5 && !isPinned(plan, k)) days.push(k);
+  }
+  if (left > 0 && days.length) {
+    // Every day gets the same number of 15-minute pieces; the first days get one more if it doesn't divide.
+    const pieces = Math.ceil(left / 15), each = Math.floor(pieces / days.length), extra = pieces % days.length;
+    days.forEach((k, i) => {
+      const min = Math.min(720, (each + (i < extra ? 1 : 0)) * 15);
+      if (min) (planned[k] ??= {})[plan.id] = min;
+    });
+  }
+  return snapshot() !== before;
+}
+
+// Rebalances every plan, and saves if anything moved (say, a day went by with less studied than planned).
+function rebalanceAll() {
+  let changed = false;
+  for (const p of state.plans) changed = rebalancePlan(p) || changed;
+  if (changed) save();
+  return changed;
+}
+
+// A change you make by hand to a plan's time on a day: that day is pinned and the plan's other days adjust.
+function setByHand(k, id, min) {
+  const plan = planById(id);
+  setPlanned(k, id, min);
+  if (plan) { pinDay(plan, k); rebalancePlan(plan); }
+}
+
+// Removes a plan, every hour planned for it and its own progress. The study time itself stays in your stats.
+function removePlan(id) {
+  state.plans = state.plans.filter((p) => p.id !== id);
+  for (const days of [state.planned, state.planHistory]) {
+    for (const [k, day] of Object.entries(days)) {
+      delete day[id];
+      if (!Object.keys(day).length) delete days[k];
+    }
+  }
+  if (state.settings.planId === id) state.settings.planId = null;
+  if (state.session?.planId === id) state.session.planId = null; // the rest of the session counts toward no plan
+  if (planner.focus === id) planner.focus = null;
+}
+
+function renderPlanList() {
+  const el = $('planList'), today = todayKey();
+  el.innerHTML = state.plans.length ? '' : '<p class="summary">No plans yet. Add an exam or a project with “+ New plan”.</p>';
+  for (const p of state.plans) {
+    const left = daysBetween(today, p.deadline), color = subjectColor(p.subjectId);
+    const due = left < 0 ? 'deadline passed' : left === 0 ? 'due today' : `${left} day${left === 1 ? '' : 's'} left`;
+    const card = document.createElement('button');
+    card.className = 'pl-card' + (planner.focus === p.id ? ' on' : '');
+    card.dataset.plan = p.id;
+    card.style.setProperty('--c', color);
+    card.setAttribute('aria-pressed', planner.focus === p.id);
+    card.title = 'Click to highlight this plan on the calendar';
+    // "Planned ahead" is today and later: past days you skipped don't count as planned any more.
+    const studied = planStudied(p), planned = plannedFrom(p, today), unplanned = planMissing(p, today);
+    const status = studied >= p.needMin ? '<span class="pl-stat ok">🎉 Done: you studied all the hours</span>'
+      : left < 0 ? `<span class="pl-stat">Deadline passed with ${fmtShort(p.needMin - studied)} left</span>`
+      : unplanned > 0 ? `<span class="pl-stat warn">⚠ ${fmtShort(unplanned)} still unplanned</span>`
+      : `<span class="pl-stat ok">✓ Fully planned${p.auto ? ', and keeps itself balanced' : ''}</span>`;
+    card.innerHTML = `<span class="pl-name"><span class="dot" style="background:${color}"></span>${escapeHtml(p.name)}</span>` +
+      `<span class="pl-meta">${p.type} · ${escapeHtml(subjectName(p.subjectId))} · due ${fmtDayShort(p.deadline)} (${due})</span>` +
+      `<span class="meter"><span class="meter-fill" style="width:${Math.min(100, (studied / p.needMin) * 100)}%"></span></span>` +
+      `<span class="pl-num">${fmtShort(studied)} studied of ${fmtShort(p.needMin)} · ${fmtShort(planned)} planned ahead</span>${status}`;
+    el.appendChild(card);
+  }
+  $('autoFillBtn').disabled = !state.plans.some((p) => p.deadline >= today && (!p.auto || planMissing(p, today) > 0));
+  const focused = planById(planner.focus);
+  $('deletePlanBtn').hidden = !focused;
+  if (focused) $('deletePlanBtn').textContent = `Delete “${focused.name}”`;
+}
+
+function renderCalendar() {
+  const { year, month } = planner.month, today = todayKey();
+  $('calTitle').textContent = new Date(year, month, 1).toLocaleDateString(LOCALE, { month: 'long', year: 'numeric' });
+  const cal = $('calendar');
+  cal.innerHTML = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => `<div class="dow">${d}</div>`).join('');
+  for (const k of monthGrid(year, month)) {
+    const d = parseKey(k), weekday = (d.getDay() + 6) % 7;
+    const cell = document.createElement('button');
+    cell.className = ['cell', d.getMonth() !== month && 'other', weekday > 4 && 'weekend', k === today && 'today',
+      k === planner.selected && 'sel'].filter(Boolean).join(' ');
+    cell.dataset.day = k;
+    cell.setAttribute('aria-pressed', k === planner.selected);
+    cell.setAttribute('aria-label', fmtDayLong(k));
+    const flags = state.plans.filter((p) => p.deadline === k)
+      .map((p) => `<span class="flag" title="Deadline: ${escapeHtml(p.name)}">🎯</span>`).join('');
+    const items = plannedOn(k);
+    // One pill per plan in its subject's colour; the others fade while a plan is highlighted.
+    const pills = items.map(({ plan, min }) => {
+      const pinned = plan.auto && isPinned(plan, k); // set by you, shown in bold
+      return `<span class="pill${planner.focus && planner.focus !== plan.id ? ' faded' : ''}${pinned ? ' pinned' : ''}" ` +
+        `style="--c:${subjectColor(plan.subjectId)}" title="${escapeHtml(plan.name)}: ${fmtMinutes(min)}${pinned ? ' (set by you)' : ''}">${fmtHM(min)}</span>`;
+    }).join('');
+    cell.innerHTML = `<span class="dn">${d.getDate()}</span>${flags}${pills}${dayTotalHtml(k, items)}`;
+    cal.appendChild(cell);
+  }
+}
+
+// The total under a calendar day: what's planned, and up to today what was studied for those plans.
+// A past day shows in amber when less was studied than planned.
+function dayTotalHtml(k, items) {
+  const planned = items.reduce((a, x) => a + x.min, 0);
+  if (!planned) return '';
+  const today = todayKey();
+  if (k > today) return `<span class="tot">${fmtHM(planned)}</span>`;
+  const studied = items.reduce((a, x) => a + planStudiedOn(x.plan, k), 0);
+  return `<span class="tot${k < today && studied < planned ? ' short' : ''}" title="Studied / planned">${fmtHM(studied)} / ${fmtHM(planned)}</span>`;
+}
+
+// The rows of the day panel: the plans planned that day, plus balanced plans you pinned at 0 there
+// (so the day stays free for them, and you can unpin it).
+function dayRows(k) {
+  const rows = plannedOn(k);
+  for (const plan of state.plans) {
+    if (plan.auto && plan.deadline >= k && isPinned(plan, k) && !rows.some((r) => r.plan.id === plan.id)) rows.push({ plan, min: 0 });
+  }
+  return rows;
+}
+
+function renderDayPanel() {
+  const k = planner.selected, today = todayKey(), past = k < today, items = dayRows(k);
+  const total = items.reduce((a, x) => a + x.min, 0);
+  const tag = k === today ? '<span class="tile-sub">Today</span>' : past ? '<span class="tile-sub">Past day</span>' : '';
+  let html = `<h2><span>${fmtDayLong(k)}</span>${tag}</h2>`;
+  if (!items.length) html += `<p class="empty-day">${past ? 'Nothing was planned for this day.' : 'Nothing planned for this day yet.'}</p>`;
+  for (const { plan, min } of items) {
+    const name = escapeHtml(plan.name);
+    // Days before today can't be planned any more, so they only show what was planned.
+    const amount = past ? `<b class="d-min">${fmtShort(min)}</b>`
+      : `<span class="stepper"><button data-step="-15" data-plan="${plan.id}" aria-label="15 minutes less of ${name}">−</button>` +
+        // Click the time to type it (see startTimeEdit).
+        `<button class="d-time-btn" data-edit="${plan.id}" title="Click to type the time" aria-label="Time for ${name}: ${fmtMinutes(min)}. Click to type it">${fmtShort(min)}</button>` +
+        `<button data-step="15" data-plan="${plan.id}" aria-label="15 minutes more of ${name}">+</button></span>`;
+    // Balanced plans: 📌 on a day you set yourself (click to let it adjust again), "auto" on the others.
+    const pin = past || !plan.auto ? ''
+      : isPinned(plan, k) ? `<button class="d-pin" data-unpin="${plan.id}" title="You set this day yourself. Click to let it adjust by itself again" aria-label="Unpin ${name} on this day">📌</button>`
+      : '<span class="d-auto" title="Adjusts by itself to keep the plan balanced. Change it and it’s pinned">auto</span>';
+    html += `<div class="d-row"><span class="nm"><span class="dot" style="background:${subjectColor(plan.subjectId)}"></span>${name}</span>` +
+      `${amount}${pin}<span class="st">${dayStudiedText(plan, k)}</span></div>`;
+  }
+  const addable = past ? [] : state.plans.filter((p) => p.deadline >= k && !items.some((x) => x.plan.id === p.id));
+  if (addable.length) {
+    html += `<div class="d-add"><select id="dayAdd" aria-label="Add a plan to this day"><option value="">+ Add a plan to this day…</option>` +
+      addable.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('') + '</select></div>';
+  }
+  html += `<div class="d-foot"><span class="sum">Planned <b>${fmtShort(total)}</b>${daySummaryExtra(k, items)}</span>` +
+    `<span class="btns"><button id="copyDayBtn" ${items.length && keyAdd(k, 1) >= today ? '' : 'disabled'}>Copy to next day</button>` +
+    `<button id="clearDayBtn" class="danger" ${items.length && !past ? '' : 'disabled'}>Clear day</button></span></div>`;
+  $('dayPanel').innerHTML = html;
+}
+
+// Clicking a plan's time in the day panel turns it into a text box: type 1:30, 90 or 1h 30, then Enter.
+function startTimeEdit(btn) {
+  const id = btn.dataset.edit, min = state.planned[planner.selected]?.[id] || 0;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'd-time-input';
+  input.dataset.plan = id;
+  input.value = `${Math.floor(min / 60)}:${pad(min % 60)}`;
+  input.title = 'Type 1:30, 90 or 1h 30, then press Enter (Esc cancels)';
+  input.setAttribute('aria-label', btn.getAttribute('aria-label').replace('Click to type it', 'Type the time'));
+  btn.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+// Saves (keep) or cancels a typed time. Something that isn't a time stays in the box, marked, until fixed or Esc.
+function finishTimeEdit(input, keep) {
+  if (input.dataset.done) return; // already handled (Enter, then the box losing focus)
+  if (keep) {
+    const min = parseDuration(input.value);
+    if (min == null) { input.classList.add('bad'); return; }
+    input.dataset.done = '1';
+    setByHand(planner.selected, input.dataset.plan, min); // up to 12 h; 0 takes the plan off the day
+    save();
+  } else input.dataset.done = '1';
+  renderPlanner();
+}
+
+// What was studied for a plan on a day (nothing to show for days still ahead).
+function dayStudiedText(plan, k) {
+  if (k > todayKey()) return '';
+  const min = planStudiedOn(plan, k);
+  return min >= 1 ? `${fmtShort(min)} studied` : 'not studied';
+}
+function daySummaryExtra(k, items) {
+  if (k > todayKey()) return '';
+  return ` · Studied <b>${fmtShort(items.reduce((a, x) => a + planStudiedOn(x.plan, k), 0))}</b>`;
+}
+
+function renderPlanner() {
+  planner.selected ??= todayKey();
+  if (!planner.month) {
+    const d = parseKey(planner.selected);
+    planner.month = { year: d.getFullYear(), month: d.getMonth() };
+  }
+  $('autoFillStatus').textContent = ''; // only right after Auto-fill
+  renderPlanList();
+  renderCalendar();
+  renderDayPanel();
+}
+
+function selectDay(k) {
+  planner.selected = k;
+  const d = parseKey(k);
+  planner.month = { year: d.getFullYear(), month: d.getMonth() };
+  renderPlanner();
+}
+
+function moveMonth(step) {
+  const m = planner.month.month + step;
+  planner.month = { year: planner.month.year + Math.floor(m / 12), month: ((m % 12) + 12) % 12 };
+  renderCalendar();
+}
+
+// ---- "Today's plan" card on the start screen ----
+// Plans of hidden subjects are left out, because a hidden subject can't be picked to study.
+function todaysPlans() {
+  const today = todayKey();
+  return plannedOn(today).filter(({ plan }) => plan.deadline >= today && subjectById(plan.subjectId) && !subjectById(plan.subjectId).hidden);
+}
+
+function renderTodayPlan() {
+  const items = todaysPlans(), today = todayKey();
+  $('todayPlanCard').hidden = !items.length;
+  const total = state.settings.hours * 60 + state.settings.minutes;
+  const el = $('todayPlanList');
+  el.innerHTML = '';
+  for (const { plan, min } of items) {
+    const done = planStudiedOn(plan, today), color = subjectColor(plan.subjectId);
+    const row = document.createElement('button');
+    // Highlighted while the start screen is set to exactly this plan.
+    const picked = currentPlanId() === plan.id && total === min;
+    row.className = 'tp-row' + (picked ? ' selected' : '');
+    row.dataset.plan = plan.id;
+    row.style.setProperty('--c', color);
+    row.setAttribute('aria-pressed', picked);
+    row.innerHTML = `<span class="dot" style="background:${color}"></span><span class="tp-name">${escapeHtml(plan.name)}</span>` +
+      `<span class="tp-time">${fmtMinutes(min)}</span><span class="tp-done">${done >= 1 ? `${fmtShort(done)} done` : 'not started'}</span>`;
+    el.appendChild(row);
+  }
+}
+
+// Fills in the start screen for a plan: its time for today, its subject, and the plan the session counts toward.
+function pickTodayPlan(id) {
+  const item = todaysPlans().find((x) => x.plan.id === id);
+  if (!item) return;
+  $('hours').value = Math.floor(item.min / 60);
+  $('minutes').value = item.min % 60;
+  state.settings.subjectId = item.plan.subjectId;
+  state.settings.planId = item.plan.id;
+  updatePreview(); // saves, and redraws this card
+  renderSubjectPicker();
+}
+
+// ---- "Counts toward" on the start screen ----
+// Shown when the picked subject has plans: one of them is picked automatically, and you can change it or
+// pick "No plan" (then the session still counts in your stats, just not toward a plan).
+function renderPlanPick() {
+  const plans = activePlans(currentSubjectId());
+  $('planPick').hidden = !plans.length;
+  const el = $('planOptions');
+  el.innerHTML = '';
+  if (!plans.length) return;
+  const chosen = currentPlanId(), auto = state.settings.planId == null;
+  for (const p of [...plans, null]) {
+    const label = document.createElement('label');
+    label.className = 'check';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'planPick';
+    radio.value = p ? p.id : 'none';
+    radio.checked = (p ? p.id : null) === chosen;
+    const text = document.createElement('span');
+    text.className = 'pp-name';
+    text.textContent = p ? p.name : 'No plan';
+    const meta = document.createElement('span');
+    meta.className = 'tile-sub';
+    meta.textContent = p ? `${p.type} · due ${fmtDayShort(p.deadline)}${auto && p.id === chosen ? ' · picked for you' : ''}`
+      : 'counts in your stats only';
+    label.append(radio, text, meta);
+    el.appendChild(label);
+  }
+}
+
+// ---- New plan popup ----
+
+// ---- New plan popup ----
+function renderPlanFormChoices() {
+  document.querySelectorAll('#planType button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.type === planFormType);
+    b.setAttribute('aria-checked', b.dataset.type === planFormType);
+  });
+  const el = $('planSubjects'), subjects = state.subjects.filter((s) => !s.hidden);
+  el.innerHTML = subjects.length ? ''
+    : '<span class="summary">Add a subject on the start screen first: every plan belongs to a subject.</span>';
+  for (const s of subjects) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip' + (s.id === planFormSubject ? ' selected' : '');
+    chip.dataset.subject = s.id;
+    chip.style.setProperty('--chip-color', subjectColor(s.id));
+    chip.setAttribute('aria-pressed', s.id === planFormSubject);
+    chip.innerHTML = `<span class="dot" style="background:${subjectColor(s.id)}"></span>`;
+    chip.append(s.name);
+    el.appendChild(chip);
+  }
+}
+
+function openPlanForm() {
+  planFormType = 'Exam';
+  planFormSubject = null;
+  $('planName').value = '';
+  $('planDeadline').min = todayKey();
+  $('planDeadline').value = keyAdd(todayKey(), 14);
+  $('planHours').value = 10;
+  $('planAutoFill').checked = true;
+  $('planError').textContent = '';
+  renderPlanFormChoices();
+  $('planDialog').showModal();
+  $('planName').focus();
+}
+
+function savePlanForm(e) {
+  e.preventDefault();
+  const name = $('planName').value.trim(), deadline = $('planDeadline').value;
+  const hours = parseFloat($('planHours').value), today = todayKey();
+  const error = !name ? 'Give the plan a name.'
+    : !planFormSubject ? 'Pick the subject this plan is for.'
+    : !/^\d{4}-\d{2}-\d{2}$/.test(deadline) || deadline < today ? 'The deadline can’t be before today.'
+    : !(hours > 0 && hours <= 500) ? 'Hours needed must be more than 0 and at most 500.'
+    : '';
+  $('planError').textContent = error;
+  if (error) return;
+  const plan = { id: `p${Date.now()}`, name, type: planFormType, subjectId: planFormSubject, created: today, deadline, needMin: Math.round(hours * 60) };
+  state.plans.push(plan);
+  if ($('planAutoFill').checked) { plan.auto = true; rebalancePlan(plan); }
+  save();
+  $('planDialog').close();
+  planner.focus = plan.id;
+  renderPlanner();
+}
+
+function initPlanner() {
+  $('planBtn').addEventListener('click', () => show('planner'));
+  $('planOptions').addEventListener('change', (e) => {
+    if (e.target.name !== 'planPick') return;
+    state.settings.planId = e.target.value; // a plan id, or 'none'
+    save();
+    renderPlanPick();
+    renderTodayPlan();
+  });
+  $('todayPlanList').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-plan]');
+    if (row) pickTodayPlan(row.dataset.plan);
+  });
+  $('plannerBack').addEventListener('click', () => show('setup'));
+  $('newPlanBtn').addEventListener('click', openPlanForm);
+  $('planList').addEventListener('click', (e) => {
+    const card = e.target.closest('[data-plan]');
+    if (!card) return;
+    planner.focus = planner.focus === card.dataset.plan ? null : card.dataset.plan; // click again to clear
+    renderPlanner();
+  });
+  $('calendar').addEventListener('click', (e) => {
+    const cell = e.target.closest('[data-day]');
+    if (cell) selectDay(cell.dataset.day);
+  });
+  $('calPrev').addEventListener('click', () => moveMonth(-1));
+  $('calNext').addEventListener('click', () => moveMonth(1));
+  $('calToday').addEventListener('click', () => selectDay(todayKey()));
+  $('dayPanel').addEventListener('keydown', (e) => {
+    if (!e.target.matches('.d-time-input')) return;
+    if (e.key === 'Enter') { e.preventDefault(); finishTimeEdit(e.target, true); }
+    if (e.key === 'Escape') finishTimeEdit(e.target, false);
+  });
+  // Clicking somewhere else saves what you typed, if it makes sense; otherwise the old time stays.
+  $('dayPanel').addEventListener('focusout', (e) => {
+    if (e.target.matches('.d-time-input')) finishTimeEdit(e.target, parseDuration(e.target.value) != null);
+  });
+  $('dayPanel').addEventListener('click', (e) => {
+    const k = planner.selected;
+    const edit = e.target.closest('[data-edit]');
+    if (edit) return startTimeEdit(edit);
+    const step = e.target.closest('[data-step]'), unpin = e.target.closest('[data-unpin]');
+    if (step) {
+      const cur = state.planned[k]?.[step.dataset.plan] || 0;
+      setByHand(k, step.dataset.plan, cur + Number(step.dataset.step));
+    } else if (unpin) {
+      const plan = planById(unpin.dataset.unpin);
+      unpinDay(plan, k); // back to adjusting by itself
+      rebalancePlan(plan);
+    } else if (e.target.closest('#copyDayBtn')) {
+      const next = copyDayToNext(k);
+      save();
+      return selectDay(next); // show the day it was copied to
+    } else if (e.target.closest('#clearDayBtn')) {
+      for (const { plan } of dayRows(k)) setByHand(k, plan.id, 0); // pinned at 0, so the day stays free
+    } else return;
+    save();
+    renderPlanner();
+  });
+  $('dayPanel').addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.id === 'dayAdd' && t.value) {
+      setByHand(planner.selected, t.value, 60); // starts at 1 h; type the time or use − / +
+    } else return;
+    save();
+    renderPlanner();
+  });
+  $('autoFillBtn').addEventListener('click', () => {
+    const today = todayKey(), active = state.plans.filter((p) => p.deadline >= today);
+    for (const p of active) {
+      p.auto = true; // from now on it keeps itself balanced
+      rebalancePlan(p);
+    }
+    save();
+    renderPlanner();
+    const short = active.filter((p) => planMissing(p, today) > 0).length;
+    $('autoFillStatus').textContent = !short
+      ? 'Done: the missing hours are spread over the days left, and they’ll keep adjusting as you change days.'
+      : `${short} plan${short === 1 ? ' doesn’t' : 's don’t'} fit in the days left (12 h a day at most, weekdays only). ` +
+        'Unpin some days (📌), or plan weekends yourself.';
+  });
+  $('deletePlanBtn').addEventListener('click', async () => {
+    const p = planById(planner.focus);
+    if (!p) return;
+    const ok = await askConfirm({
+      title: `Delete “${p.name}”?`,
+      text: 'The plan and the hours planned for it are removed. The time you studied stays in your stats. This can’t be undone.',
+      yes: 'Delete plan',
+      no: 'Cancel',
+    });
+    if (!ok || !planById(p.id)) return;
+    removePlan(p.id);
+    save();
+    renderPlanner();
+  });
+
+  $('planType').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-type]');
+    if (!b) return;
+    planFormType = b.dataset.type;
+    renderPlanFormChoices();
+  });
+  $('planSubjects').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-subject]');
+    if (!chip || chip.disabled) return;
+    planFormSubject = chip.dataset.subject;
+    renderPlanFormChoices();
+  });
+  $('planCancel').addEventListener('click', () => $('planDialog').close());
+  $('planForm').addEventListener('submit', savePlanForm);
+  closeOnBackdropClick($('planDialog'));
+  // A new day may have gone by since the app was last open: move any missed time to the days left.
+  if (rebalanceAll()) renderTodayPlan();
 }
 
 // ---------- Settings ----------
@@ -1616,7 +2253,7 @@ function initSettings() {
     e.preventDefault();
     const name = $('settingsSubjectName').value.trim();
     if (!name) return $('settingsSubjectName').focus();
-    const existing = state.subjects.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    const existing = state.subjects.find((x) => !x.deleted && x.name.toLowerCase() === name.toLowerCase());
     if (existing) existing.hidden = false; // same name: show it again instead of adding a duplicate
     else state.subjects.push({ id: `s${Date.now()}`, name, color: nextFreeColor(), hidden: false });
     save();
@@ -1641,6 +2278,7 @@ function initSettings() {
     });
     if (!reset) return;
     state.history = {};
+    state.planHistory = {}; // plans and planned hours stay; the time studied for them starts again
     state.sessionCount = 0;
     state.sessionLog = [];
     state.achievements = {};
@@ -1666,6 +2304,7 @@ initSetup();
 initSubjects();
 initSession();
 initStats();
+initPlanner();
 initShare();
 initSettings();
 initSound();

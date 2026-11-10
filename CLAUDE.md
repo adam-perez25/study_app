@@ -2,28 +2,28 @@
 ## Project map
 
 ### Overview
-Study Timer (v0.2.0, package `study-timer`) is a pomodoro-style Windows desktop app. You pick a total time, breaks included, and it splits that time into focus, short-break and long-break blocks. It also has a session task list, subjects, stats, streaks, levels, achievements, shareable stats cards, a floating mini timer and full screen. Stack: Electron ^45 and plain JS, with no framework, bundler or TypeScript. Dev deps are vitest, jsdom and electron-builder. Scripts: `npm start` (`electron .`), `npm test` (`vitest run`), `npm run dist` (NSIS installer `dist/Study-Timer-Setup-${version}.exe`).
+Study Timer (v0.2.0, package `study-timer`) is a pomodoro-style Windows desktop app. You pick a total time, breaks included, and it splits that time into focus, short-break and long-break blocks. It also has a "No breaks" option, a session task list, subjects, stats, streaks, levels (with an all-levels popup), achievements, shareable stats cards, a planner for exams and projects, a floating mini timer and full screen. Stack: Electron ^45 and plain JS, with no framework, bundler or TypeScript. Dev deps are vitest, jsdom and electron-builder. Scripts: `npm start` (`electron .`), `npm test` (`vitest run`), `npm run dist` (NSIS installer `dist/Study-Timer-Setup-${version}.exe`).
 
 ### Layout
 | Path | Purpose |
 | --- | --- |
 | `main.js` | Main process: windows, IPC, clipboard and save dialog, Windows taskbar and notification quirks |
 | `preload.js` | `contextBridge` exposes `window.desktop` |
-| `src/index.html` | Main window markup. Screens: setup, session, done, stats, settings |
-| `src/app.js` (~1620 lines) | The whole renderer app as one global script (not a module). Navigate by its `// ----------` section banners |
+| `src/index.html` | Main window markup. Screens: setup, session, done, stats, settings, planner. Dialogs: `confirmDialog`, `planDialog`, `levelsDialog` |
+| `src/app.js` (~2130 lines) | The whole renderer app as one global script (not a module). Navigate by its `// ----------` section banners |
 | `src/styles.css` | Styles, dark mode, `--subj-N` colour variables |
 | `src/mini.html`, `src/mini.js` | Floating mini timer window |
-| `tests/` | `planning`, `session`, `stats` `.test.js`, plus the jsdom harness `helpers/loadApp.js` |
+| `tests/` | `planning`, `session`, `stats`, `planner` `.test.js`, plus the jsdom harness `helpers/loadApp.js` |
 | `tools/` | `make-shortcut.ps1`/`.js` (Desktop and Start Menu `.lnk` files), `make-icon.ps1` (draws `assets/icon.*`) |
 
 ### Entry points and flow
 - `app.whenReady` (main.js:229) runs `blockElectronShortcut()` and then `createWindow()` (main.js:20). The window uses `contextIsolation`, `preload.js` and `backgroundThrottling: false`, and loads `src/index.html`.
-- `app.js` boot (~line 1588) runs `initSetup/Subjects/Session/Stats/Share/Settings/Sound`. If a session is saved, it calls `freezeStaleSession()` (1607) and then `runSession()`.
-- Timer: a 250 ms interval calls `tick()` (398), which calls `publishTimer()` (478). That sends `window.desktop.updateTimer(snapshot)` only when the snapshot changed. Main forwards it to the mini window as `'timer'`.
+- `app.js` boot (~line 2099) runs `initSetup/Subjects/Session/Stats/Planner/Share/Settings/Sound`. If a session is saved, it calls `freezeStaleSession()` (~2119) and then `runSession()`.
+- Timer: a 250 ms interval calls `tick()` (~411), which calls `publishTimer()` (~491). That sends `window.desktop.updateTimer(snapshot)` only when the snapshot changed. Main forwards it to the mini window as `'timer'`.
 - IPC (preload name -> channel):
   - `updateTimer` -> `timer:update`. Sending `null` closes the mini window and exits full screen.
   - `toggleMini` -> `mini:toggle`.
-  - `sendCommand` -> `mini:command`. `open` and `close` are handled in main. Others (`pause`, `skip`) are relayed to the app as `'command'`, which reaches `onCommand` (app.js:578).
+  - `sendCommand` -> `mini:command`. `open` and `close` are handled in main. Others (`pause`, `skip`) are relayed to the app as `'command'`, which reaches the `window.desktop.onCommand` handler (app.js:~591).
   - `answerClose` -> `close:answer`.
   - `toggleFullScreen` -> `fullscreen:toggle`, `exitFullScreen` -> `fullscreen:exit`. Main replies with `'fullscreen'`.
   - `openDndSettings` -> `dnd:open`.
@@ -31,27 +31,33 @@ Study Timer (v0.2.0, package `study-timer`) is a pomodoro-style Windows desktop 
 - Mini window: `openMini` (main.js:79) creates a frameless, always-on-top 280x112 window. During a session it opens automatically on main-window blur or minimize, and closes on focus or restore (`miniAuto`).
 
 ### Key modules (src/app.js)
-- `load`/`save`: lines 6-40. `buildPlan`: 45. Subjects: ~173. Tasks: ~271.
-- Session: `startSession`, `tick`, `togglePause`, `skipBlock`, `finishSession`, `askConfirm`, `confirmClose` (637).
-- Sound: `CHIMES` (~661), `announce`.
-- Stats (~793): `dayKey`, `streaks`, `levelInfo`, `renderStats/Bars/Heatmap`.
-- Achievements: `ACHIEVEMENTS` (~1116), `checkAchievements`.
+- `load`/`save`: lines 6-44. `buildPlan` (pure; `noBreaks` gives one focus block): ~49. Subjects: ~186. Tasks: ~285.
+- Session: `show` (~358), `startSession`, `tick`, `togglePause`, `skipBlock`, `finishSession`, `askConfirm`, `confirmClose` (~670).
+- Shared helpers next to `askConfirm`: `closeOnBackdropClick(dlg)` (outside click closes a popup) and `escapeHtml` (use it for user text put in `innerHTML`).
+- Sound: `CHIMES` (~694), `announce`.
+- Stats (~824): `dayKey`, `streaks`, `levelInfo`, `levelTable` (pure, rows of the all-levels popup), `renderStats/Bars/Heatmap`, `renderLevels`/`openLevels`.
+- Achievements: `ACHIEVEMENTS` (~1167), `checkAchievements`.
 - Share cards: `shareData`, `drawShareCard` (canvas to PNG data URL), `shareText`.
+- Planner (~1610): pure helpers `monthGrid`, `activePlans`, `defaultPlan`, `currentPlanId`, `planStudiedOn`/`planStudied`, `planPlanned`, `setPlanned`, `setByHand`, `copyDayToNext`, `rebalancePlan`/`rebalanceAll`, `planMissing`, `parseDuration`, `removePlan`. UI: `renderPlanner` (list, calendar, day panel), `renderTodayPlan` (start-screen card, redrawn by `updatePreview` and `renderSubjectPicker`), `renderPlanPick` ("Counts toward" radios, redrawn by `renderSubjectPicker`), the plan form (`openPlanForm`, `savePlanForm`). `planner` holds what the screen shows and isn't saved.
 - Settings: `applyTheme`.
 - `mini.js` renders the snapshot `{type,label,blockText,endsAt,pausedRemaining,waiting,totalMs}`.
 
 ### Data and state
 - The only storage is the localStorage key `'study-timer-v1'`, which holds the whole `state` as JSON. `userData` is forced to `%APPDATA%\study-timer` (main.js:~225).
 - `state`:
-  - `settings` {hours, minutes, focusLen, shortLen, longLen, longEvery, dailyGoal, autoStartFocus, theme, subjectId, sound{chime,volume,muted}}
+  - `settings` {hours, minutes, focusLen, shortLen, longLen, longEvery, noBreaks, dailyGoal, autoStartFocus, theme, subjectId, sound{chime,volume,muted}}
   - `tasks` [{id,text,done}]
-  - `session` null or {blocks,index,endsAt,pausedRemaining,startedAt,focusedMs,waiting,lastSeen}
+  - `session` null or {blocks,index,endsAt,pausedRemaining,startedAt,focusedMs,waiting,lastSeen,subjectId,planId}
   - `history` {'YYYY-MM-DD': {subjectId|'none': ms}}
   - `sessionCount`, `sessionLog` ['YYYY-MM-DD']
-  - `subjects` [{id,name,color 0-7,hidden}]
+  - `subjects` [{id,name,color 0-7,hidden,deleted?}]. Deleting keeps the subject with `hidden` and `deleted` set, so its `history` stays under it and Stats shows "Name (deleted)" (`subjectName`). Skip `deleted` ones wherever subjects are listed for editing or matched by name.
   - `achievements` {id: ISO date}
   - `records` {tasksDone, earlyStarts, lateStarts, longestSessionMs}
-- Migration: new fields get `??=` defaults at app.js:13-32. Follow this pattern when adding fields.
+  - `plans` [{id,name,type 'Exam'|'Project',subjectId,created,deadline,needMin,auto?,pinned?}]. A subject can have several active plans (deadline >= today). Progress comes only from `planHistory`. `auto` plans are kept balanced by `rebalancePlan`: `pinned` (day keys) keep what you set by hand (`setByHand` pins, also at 0), the unpinned weekdays from today to the deadline share `needMin − studiedBefore(today) − pinned`. `rebalanceAll` runs at boot and when the Planner opens, so missed time moves forward.
+  - `planned` {'YYYY-MM-DD': {planId: minutes}}, whole minutes (typed, or − / + in 15-minute steps; auto-fill uses 15-minute pieces), at most 720 a day.
+  - `planHistory` {'YYYY-MM-DD': {planId: ms}}: focus time of sessions done for a plan, added by `creditFocus` next to `history` when `session.planId` is set. Reset stats clears it.
+  - `settings.planId`: the "Counts toward" choice on the start screen, a plan id, `'none'`, or null (pick automatically). `currentPlanId()` resolves it; `startSession` stores it as `session.planId`. Changing subject sets it back to null.
+- Migration: new fields get `??=` defaults at app.js:13-34. Follow this pattern when adding fields.
 - Main-process memory only: `timer`, `miniPos`, `miniAuto`.
 
 ### Conventions

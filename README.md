@@ -54,7 +54,8 @@ The tests use [Vitest](https://vitest.dev/) and load `src/index.html` and `src/a
 - **Full screen:** **⛶ Full screen** fills the screen with the timer during a session; click **✕ Exit full screen** or press Esc to leave, and it leaves by itself when the session ends.
 - **Share your progress:** at the bottom of 📊 Stats, pick **This week** or **All time** to see a card with your focus time, sessions, days studied, streak, best day, top subject and level. **📋 Copy image** puts it on the clipboard to paste in a chat, **💾 Save image** saves it as a PNG, and **📝 Copy as text** copies the same stats as text.
 - **Do not disturb:** Windows doesn't let apps switch it on themselves, so **🔕 Do not disturb** opens Windows notification settings, where its switch is at the top. Also tick "Turn on do not disturb automatically… when using an app in full screen mode" there, and ⛶ Full screen will block notifications for you.
-- **Subjects:** pick what you're studying under "What are you studying?" (optional; click it again to clear, "+ New subject" to add one with a colour). The timer and mini timer show it, and the Stats screen's **By subject** card shows time per subject this week, this month or in total. Rename, recolour, hide, delete or add subjects in ⚙ Settings; hiding keeps their past time under the subject, deleting keeps it as "No subject". Time from before subjects existed counts as "No subject".
+- **Subjects:** pick what you're studying under "What are you studying?" (optional; click it again to clear, "+ New subject" to add one with a colour). The timer and mini timer show it, and the Stats screen's **By subject** card shows time per subject this week, this month or in total. Rename, recolour, hide, delete or add subjects in ⚙ Settings; hiding keeps their past time under the subject, and so does deleting: a deleted subject disappears from the start screen, Settings and the planner, but its time still counts in every total and shows in **By subject** as "Name (deleted)". Time from before subjects existed counts as "No subject".
+- **📅 Planner:** plan exams and projects. **📅 Plan** on the start screen opens it; **+ New plan** asks for a name, Exam or Project, a subject, a deadline and the hours needed. Click a day on the month calendar to choose how long to study each plan that day (click the time and type it, like 1:30, 90 or 1h 30, or use − / + to move 15 minutes; up to 12 h), then **Copy to next day** or **Clear day**. **Spread the missing hours** (also offered when you make a plan) shares a plan's time evenly over the weekdays left before its deadline and keeps it balanced: when you change a day it's pinned 📌 and the plan's other days adjust (put less on Tuesday and the next days get a bit more, put more and they get less), clearing a day keeps it free, clicking 📌 lets that day adjust by itself again, and time you don't study moves to the days left. Plans you plan entirely by hand are never changed. A subject can have several plans at once (say, an exam and a project). When you pick a subject that has plans, the start screen shows **Counts toward**: one plan is picked for you (the one with the most time planned today, otherwise the soonest deadline) and you can pick another one or **No plan**. A plan's progress is only the sessions you did for it, so the same study time never counts twice; with No plan the time still counts in your stats. Each plan shows hours studied, needed and planned, and warns when the planned hours don't cover what's needed. Past days show studied / planned, in amber when you fell short. When something is planned for today, the start screen shows a **Today's plan** card: pick one and its time, subject and plan are filled in. Deleting a subject deletes its plans; **Reset stats** keeps your plans and planned hours but starts their progress again.
 - **Progress tracking:** every minute of focus is logged per day. The 📊 Stats screen shows today, this week, this month and all time, your streak (a day counts once you focus 10+ min), a comparison with the same point last week, levels you earn as hours add up (Beginner, Apprentice, Learner…; click the level card to open a list of all 20 levels with their tier colour, the hours each one needs, the ones you've reached and the time left to the next one), a 14-day chart and a 20-week calendar. Set your daily goal in ⚙ Settings, or start over there with **Reset stats** (tasks, subjects and settings are kept).
 - **🏅 Achievements:** badges for total hours (1 to 100 h), streaks (3 to 30 days), completed sessions, 5 sessions in one week and reaching your daily goal on 7 days. New ones are announced at the end of a session; all of them are on the Stats screen. Once unlocked, a badge stays unlocked.
 - **⚙ Settings** (next to 📊 Stats): Appearance (Light, Dark or Match Windows), Sound (chime, volume, mute), Subjects, Timer (the "I'm back" switch and daily goal) and Data (Reset stats).
@@ -65,24 +66,17 @@ The tests use [Vitest](https://vitest.dev/) and load `src/index.html` and `src/a
 
 | File | What it is |
 | --- | --- |
-| `src/index.html` | The screens (setup, timer, done) |
+| `src/index.html` | The screens (setup, timer, done, stats, settings, planner) and the popups |
 | `src/styles.css` | Look and feel, including dark mode |
-| `src/app.js` | All the logic: planning blocks, the timer, tasks, subjects, stats, achievements, sounds, settings |
+| `src/app.js` | All the logic: planning blocks, the timer, tasks, subjects, stats, achievements, sounds, the planner, settings |
 | `src/mini.html`, `src/mini.js` | The floating mini timer |
 | `main.js` | Electron: opens the app window and the mini timer, and passes messages between them |
 | `preload.js` | The bridge that lets the pages talk to Electron (`window.desktop`) |
 | `assets/` | The app icon (`icon.png`, `icon.ico`) |
-| `tests/` | Vitest tests (`planning`, `session`, `stats`) and `helpers/loadApp.js`, which loads the app into jsdom |
+| `tests/` | Vitest tests (`planning`, `session`, `stats`, `planner`) and `helpers/loadApp.js`, which loads the app into jsdom |
 | `tools/make-shortcut.ps1`, `tools/make-shortcut.js` | Create the desktop and Start Menu shortcuts |
 | `tools/make-icon.ps1` | Draws the icon into `assets/` |
 
 ## Roadmap
 
-- **Planner:** a new 📅 Plan screen (opened from the setup screen) to plan exams and projects over a calendar. Each plan has a name, a type (Exam or Project), a subject, a deadline and the hours needed. On a month calendar you choose how many hours of each plan to do on each day (15-minute steps, with "copy to next day" and "clear day"). Progress comes from the time you already study with that subject (`state.history`), so each plan shows hours studied, hours planned and a warning when the planned hours don't cover the hours needed. Suggested build order, one commit each on a `feature/planner` branch:
-  1. Plans list, plan form and an empty month calendar (`state.plans`).
-  2. Day panel that saves the hours per day (`state.planned`).
-  3. Progress bars and planned-versus-studied numbers from `history`.
-  4. A "Today's plan" card on the setup screen whose Start button fills in the time and subject.
-  5. Optional "Auto-fill" that spreads the missing hours over the free weekdays.
-
-  Decisions: one active plan per subject (so the same study time is never counted twice), and handle deleted subjects. Hours per day only, no time slots. Keep the split and progress maths in pure functions with tests, like `buildPlan`.
+Nothing planned right now. Ideas are welcome.

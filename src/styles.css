@@ -9,6 +9,7 @@
   --long: #3b7dd8;
   --accent: var(--focus);
   --danger: #c0392b;
+  --warn: #b7791f; /* planner: plans or days that fall short */
   --radius: 12px;
   /* Subject colours: a fixed, colourblind-checked categorical order. A subject keeps its slot. */
   --subj-0: #2a78d6;
@@ -41,6 +42,7 @@
     --subj-6: #9085e9;
     --subj-7: #e66767;
     --subj-none: #6b7280;
+    --warn: #e0a64a;
     color-scheme: dark;
   }
 }
@@ -59,6 +61,7 @@
   --subj-6: #9085e9;
   --subj-7: #e66767;
   --subj-none: #6b7280;
+  --warn: #e0a64a;
   color-scheme: dark;
 }
 
@@ -435,6 +438,110 @@ body.paused .time { opacity: .5; }
 .lv.next .s { color: var(--text); font-weight: 600; }
 .lv.cur { background: color-mix(in srgb, var(--tier) 18%, var(--card)); box-shadow: inset 0 0 0 1px var(--tier); }
 .lv.cur .s { color: var(--text); }
+
+/* Planner: plans on the left, a month calendar on the right (stacked in narrow windows) */
+#planner { max-width: 960px; }
+.pl-layout { display: grid; grid-template-columns: 270px 1fr; gap: 16px; align-items: start; }
+@media (max-width: 760px) { .pl-layout { grid-template-columns: 1fr; } }
+.pl-aside-title { margin: 0 0 8px; font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.pl-list { display: flex; flex-direction: column; gap: 10px; }
+.pl-card {
+  width: 100%; text-align: left; display: flex; flex-direction: column; gap: 5px;
+  padding: 12px; border-radius: var(--radius); background: var(--card);
+}
+.pl-card.on { border-color: var(--c); box-shadow: inset 0 0 0 1px var(--c); }
+.pl-name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.pl-meta { color: var(--muted); font-size: .8rem; }
+.pl-card .meter, .pl-card .meter-fill { display: block; }
+.pl-card .meter-fill { background: var(--c); }
+.pl-num { font-size: .82rem; font-variant-numeric: tabular-nums; }
+.pl-stat { font-size: .8rem; font-weight: 600; color: var(--muted); }
+.pl-stat.ok { color: var(--break); }
+.pl-stat.warn { color: var(--warn); }
+.pl-aside-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.pl-aside-actions .summary { margin: 0; font-size: .82rem; }
+.cal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.cal-head h2 { margin: 0 auto 0 4px; font-size: 1.05rem; }
+.cal-head button { padding: 6px 10px; }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.dow { font-size: .75rem; color: var(--muted); text-align: center; }
+.cal .cell {
+  position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 3px;
+  min-height: 88px; padding: 5px; text-align: left; border-radius: 8px; background: var(--card);
+}
+.cal .cell.other { opacity: .45; }
+.cal .cell.weekend { background: color-mix(in srgb, var(--card) 70%, var(--bg)); }
+.cal .cell.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.cell .dn { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; font-size: .8rem; font-weight: 600; }
+.cell.today .dn { background: var(--accent); color: #fff; }
+.cell .flag { position: absolute; top: 3px; right: 4px; font-size: .8rem; }
+.pill {
+  display: block; padding: 2px 4px; border-radius: 4px; border-left: 3px solid var(--c);
+  background: color-mix(in srgb, var(--c) 18%, var(--card));
+  font-size: .7rem; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden;
+}
+.pill.faded { opacity: .25; }
+.pill.pinned { font-weight: 700; } /* a day you set yourself */
+.cell .tot { margin-top: auto; font-size: .68rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cell .tot.short { color: var(--warn); font-weight: 600; }
+@media (max-width: 520px) {
+  .cal .cell { min-height: 60px; padding: 3px; }
+  .pill { height: 6px; padding: 0; border-left: none; background: var(--c); font-size: 0; } /* just a coloured line */
+}
+/* The selected day: hours per plan in 15-minute steps */
+.day-panel h2 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.empty-day { margin: 0 0 8px; color: var(--muted); font-size: .9rem; }
+.d-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--border); }
+.d-row:first-of-type { border-top: none; }
+.d-row .nm { flex: 1 1 150px; display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.stepper { display: flex; align-items: center; gap: 6px; }
+.stepper b, .d-min { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
+.stepper button { width: 34px; padding: 5px 0; }
+/* The time between − and +: click it to type a new one */
+.stepper .d-time-btn {
+  width: auto; min-width: 72px; padding: 5px 6px; background: transparent; border: 1px dashed transparent;
+  font-weight: 700; font-variant-numeric: tabular-nums; cursor: text;
+}
+.stepper .d-time-btn:hover { border-color: var(--border); }
+.d-pin { padding: 2px 6px; background: transparent; border-color: transparent; font-size: .9rem; }
+.d-pin:hover { border-color: var(--border); }
+.d-auto { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; min-width: 30px; text-align: center; }
+.d-time-input { width: 72px; padding: 5px 6px; text-align: center; font-variant-numeric: tabular-nums; }
+.d-time-input.bad { outline: 2px solid var(--danger); }
+.d-row .st { min-width: 90px; text-align: right; color: var(--muted); font-size: .82rem; }
+.d-add { padding-top: 8px; border-top: 1px solid var(--border); }
+.d-add select {
+  font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 10px; width: 100%; max-width: 280px;
+}
+.d-foot {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--border);
+}
+.d-foot .sum { color: var(--muted); font-size: .9rem; }
+.d-foot .sum b { color: var(--text); }
+.d-foot .btns { display: flex; gap: 8px; }
+/* "Counts toward" on the start screen: which plan the session is for */
+.plan-pick { margin-top: 12px; }
+.plan-pick[hidden] { display: none; }
+.plan-options { display: flex; flex-direction: column; gap: 2px; }
+.plan-options label.check { margin-top: 4px; flex-wrap: wrap; }
+.plan-options .pp-name { font-weight: 600; }
+/* "Today's plan" card on the start screen */
+.today-plan { display: flex; flex-direction: column; gap: 8px; }
+.tp-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; }
+.tp-row.selected { border-color: var(--c); box-shadow: inset 0 0 0 1px var(--c); }
+.tp-row .tp-name { flex: 1; font-weight: 600; }
+.tp-row .tp-time { font-variant-numeric: tabular-nums; }
+.tp-row .tp-done { min-width: 76px; text-align: right; color: var(--muted); font-size: .85rem; }
+/* New plan popup */
+.plan-dialog { width: min(460px, calc(100vw - 32px)); }
+.plan-dialog form { display: flex; flex-direction: column; gap: 12px; }
+.plan-dialog h2 { margin: 0; }
+.plan-dialog .row { margin-top: 0; }
+.field-label { display: block; margin-bottom: 4px; font-size: .85rem; color: var(--muted); }
+.confirm .plan-error { color: var(--danger); font-size: .85rem; min-height: 1.2em; margin: -4px 0 0; }
+.subject-chips .chip:disabled { opacity: .45; text-decoration: line-through; cursor: not-allowed; filter: none; }
 
 /* Sound settings popup: scrolls inside itself in short windows */
 .chime-list { list-style: none; margin: 0 0 12px; padding: 0; }

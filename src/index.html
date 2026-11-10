@@ -13,6 +13,7 @@
       <header class="top">
         <h1>Study session</h1>
         <div class="top-actions">
+          <button id="planBtn">📅 Plan</button>
           <button id="statsBtn">📊 Stats</button>
           <button id="settingsBtn">⚙ Settings</button>
         </div>
@@ -29,6 +30,13 @@
           <div class="meter"><div class="meter-fill" id="todayMeter"></div></div>
           <p class="summary" id="streakHint"></p>
         </div>
+      </div>
+
+      <!-- What the Planner has for today; only shown when something is planned -->
+      <div class="card" id="todayPlanCard" hidden>
+        <h2>Today's plan</h2>
+        <div class="today-plan" id="todayPlanList"></div>
+        <p class="summary">Pick one and the time and subject below are filled in for you.</p>
       </div>
 
       <div class="card">
@@ -78,6 +86,11 @@
           <button type="button" id="subjectCancel">Cancel</button>
         </form>
         <p class="summary" id="subjectHint"></p>
+        <!-- Which plan this session counts toward; only when the picked subject has plans -->
+        <div class="plan-pick" id="planPick" hidden>
+          <span class="field-label">Counts toward</span>
+          <div class="plan-options" id="planOptions" role="radiogroup" aria-label="Plan this session counts toward"></div>
+        </div>
         </div>
       </div>
 
@@ -248,6 +261,41 @@
       </div>
     </section>
 
+    <!-- Planner screen: plans for exams and projects, and the hours to study each day -->
+    <section id="planner" class="screen hidden">
+      <header class="top">
+        <h1>Planner</h1>
+        <div class="top-actions">
+          <button id="newPlanBtn" class="primary">+ New plan</button>
+          <button id="plannerBack">← Back</button>
+        </div>
+      </header>
+      <div class="pl-layout">
+        <aside>
+          <p class="pl-aside-title">Plans</p>
+          <div id="planList" class="pl-list"></div>
+          <div class="pl-aside-actions">
+            <button id="autoFillBtn">Spread the missing hours</button>
+            <p class="summary">Shares each plan's missing hours over the weekdays left before its deadline, and keeps them balanced: change a day and it's pinned 📌 while the other days adjust, and time you miss moves to the days left.</p>
+            <p class="summary" id="autoFillStatus" role="status"></p>
+            <button id="deletePlanBtn" class="danger" hidden></button>
+          </div>
+        </aside>
+        <div>
+          <div class="card">
+            <div class="cal-head">
+              <button id="calPrev" aria-label="Previous month">◀</button>
+              <h2 id="calTitle"></h2>
+              <button id="calToday">Today</button>
+              <button id="calNext" aria-label="Next month">▶</button>
+            </div>
+            <div class="cal" id="calendar"></div>
+          </div>
+          <div class="card day-panel" id="dayPanel"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- Settings screen -->
     <section id="settings" class="screen hidden">
       <header class="top">
@@ -318,6 +366,35 @@
         <button id="confirmNo" class="primary" autofocus></button>
         <button id="confirmYes" class="danger"></button>
       </div>
+    </dialog>
+
+    <!-- New plan popup, opened from the Planner -->
+    <dialog id="planDialog" class="confirm plan-dialog" aria-labelledby="planFormTitle">
+      <form id="planForm" novalidate>
+        <h2 id="planFormTitle">New plan</h2>
+        <label>Name <input id="planName" type="text" maxlength="40" placeholder="e.g. Chemistry exam" autocomplete="off"></label>
+        <div>
+          <span class="field-label">Type</span>
+          <div class="segmented" id="planType" role="radiogroup" aria-label="Type">
+            <button type="button" data-type="Exam" role="radio">Exam</button>
+            <button type="button" data-type="Project" role="radio">Project</button>
+          </div>
+        </div>
+        <div>
+          <span class="field-label">Subject</span>
+          <div class="subject-chips" id="planSubjects"></div>
+        </div>
+        <div class="row">
+          <label>Deadline <input id="planDeadline" type="date"></label>
+          <label>Hours needed <input id="planHours" type="number" min="0.5" max="500" step="0.5"></label>
+        </div>
+        <label class="check"><input id="planAutoFill" type="checkbox" checked> Spread the hours over the weekdays before the deadline, and keep them balanced</label>
+        <p class="plan-error" id="planError" role="alert"></p>
+        <div class="confirm-buttons">
+          <button type="button" id="planCancel">Cancel</button>
+          <button type="submit" class="primary">Save plan</button>
+        </div>
+      </form>
     </dialog>
 
     <!-- Every level and tier, opened from the level card on the Stats screen.
