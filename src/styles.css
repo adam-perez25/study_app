@@ -466,7 +466,39 @@ body.paused .time { opacity: .5; }
 .cell .dn { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; font-size: .8rem; font-weight: 600; }
 .cell.today .dn { background: var(--accent); color: #fff; }
 .cell .flag { position: absolute; top: 3px; right: 4px; font-size: .8rem; }
-@media (max-width: 520px) { .cal .cell { min-height: 60px; padding: 3px; } }
+.pill {
+  display: block; padding: 2px 4px; border-radius: 4px; border-left: 3px solid var(--c);
+  background: color-mix(in srgb, var(--c) 18%, var(--card));
+  font-size: .7rem; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden;
+}
+.pill.faded { opacity: .25; }
+.cell .tot { margin-top: auto; font-size: .68rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) {
+  .cal .cell { min-height: 60px; padding: 3px; }
+  .pill { height: 6px; padding: 0; border-left: none; background: var(--c); font-size: 0; } /* just a coloured line */
+}
+/* The selected day: hours per plan in 15-minute steps */
+.day-panel h2 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.empty-day { margin: 0 0 8px; color: var(--muted); font-size: .9rem; }
+.d-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--border); }
+.d-row:first-of-type { border-top: none; }
+.d-row .nm { flex: 1 1 150px; display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.stepper { display: flex; align-items: center; gap: 6px; }
+.stepper b, .d-min { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
+.stepper button { width: 34px; padding: 5px 0; }
+.d-row .st { min-width: 90px; text-align: right; color: var(--muted); font-size: .82rem; }
+.d-add { padding-top: 8px; border-top: 1px solid var(--border); }
+.d-add select {
+  font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 10px; width: 100%; max-width: 280px;
+}
+.d-foot {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--border);
+}
+.d-foot .sum { color: var(--muted); font-size: .9rem; }
+.d-foot .sum b { color: var(--text); }
+.d-foot .btns { display: flex; gap: 8px; }
 /* New plan popup */
 .plan-dialog { width: min(460px, calc(100vw - 32px)); }
 .plan-dialog form { display: flex; flex-direction: column; gap: 12px; }

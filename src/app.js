@@ -1617,6 +1617,38 @@ function activePlan(subjectId, plans = state.plans, today = todayKey()) {
 }
 function planById(id) { return state.plans.find((p) => p.id === id) || null; }
 
+// Compact time for calendar cells: 90 → "1:30", 60 → "1h", 45 → "45m".
+function fmtHM(min) {
+  min = Math.round(min);
+  const h = Math.floor(min / 60), m = min % 60;
+  return h && m ? `${h}:${pad(m)}` : h ? `${h}h` : `${m}m`;
+}
+
+// The plans planned on a day, with their minutes (plans that no longer exist are skipped).
+function plannedOn(k) {
+  return Object.entries(state.planned[k] || {})
+    .filter(([id, min]) => min > 0 && planById(id))
+    .map(([id, min]) => ({ plan: planById(id), min }));
+}
+
+// Sets the minutes of a plan on a day, in 15-minute steps from 0 to 12 h. 0 takes the plan off that day.
+function setPlanned(k, id, min) {
+  min = Math.max(0, Math.min(720, Math.round(min / 15) * 15));
+  const day = (state.planned[k] ??= {});
+  if (min) day[id] = min;
+  else delete day[id];
+  if (!Object.keys(day).length) delete state.planned[k];
+}
+
+// Makes the next day the same as this one (plans already past their deadline by then are left out).
+function copyDayToNext(k) {
+  const next = keyAdd(k, 1), copy = {};
+  for (const { plan, min } of plannedOn(k)) if (plan.deadline >= next) copy[plan.id] = min;
+  if (Object.keys(copy).length) state.planned[next] = copy;
+  else delete state.planned[next];
+  return next;
+}
+
 // Removes a plan and every hour planned for it.
 function removePlan(id) {
   state.plans = state.plans.filter((p) => p.id !== id);
@@ -1663,10 +1695,51 @@ function renderCalendar() {
     cell.setAttribute('aria-label', fmtDayLong(k));
     const flags = state.plans.filter((p) => p.deadline === k)
       .map((p) => `<span class="flag" title="Deadline: ${escapeHtml(p.name)}">🎯</span>`).join('');
-    cell.innerHTML = `<span class="dn">${d.getDate()}</span>${flags}`;
+    const items = plannedOn(k);
+    // One pill per plan in its subject's colour; the others fade while a plan is highlighted.
+    const pills = items.map(({ plan, min }) =>
+      `<span class="pill${planner.focus && planner.focus !== plan.id ? ' faded' : ''}" style="--c:${subjectColor(plan.subjectId)}" ` +
+      `title="${escapeHtml(plan.name)}: ${fmtMinutes(min)}">${fmtHM(min)}</span>`).join('');
+    cell.innerHTML = `<span class="dn">${d.getDate()}</span>${flags}${pills}${dayTotalHtml(k, items)}`;
     cal.appendChild(cell);
   }
 }
+
+// The total under a calendar day: what's planned (and, from step 3, what was studied).
+function dayTotalHtml(k, items) {
+  const planned = items.reduce((a, x) => a + x.min, 0);
+  return planned ? `<span class="tot">${fmtHM(planned)}</span>` : '';
+}
+
+function renderDayPanel() {
+  const k = planner.selected, today = todayKey(), past = k < today, items = plannedOn(k);
+  const total = items.reduce((a, x) => a + x.min, 0);
+  const tag = k === today ? '<span class="tile-sub">Today</span>' : past ? '<span class="tile-sub">Past day</span>' : '';
+  let html = `<h2><span>${fmtDayLong(k)}</span>${tag}</h2>`;
+  if (!items.length) html += `<p class="empty-day">${past ? 'Nothing was planned for this day.' : 'Nothing planned for this day yet.'}</p>`;
+  for (const { plan, min } of items) {
+    const name = escapeHtml(plan.name);
+    // Days before today can't be planned any more, so they only show what was planned.
+    const amount = past ? `<b class="d-min">${fmtShort(min)}</b>`
+      : `<span class="stepper"><button data-step="-15" data-plan="${plan.id}" aria-label="15 minutes less of ${name}">−</button>` +
+        `<b>${fmtShort(min)}</b><button data-step="15" data-plan="${plan.id}" aria-label="15 minutes more of ${name}">+</button></span>`;
+    html += `<div class="d-row"><span class="nm"><span class="dot" style="background:${subjectColor(plan.subjectId)}"></span>${name}</span>` +
+      `${amount}<span class="st">${dayStudiedText(plan, k)}</span></div>`;
+  }
+  const addable = past ? [] : state.plans.filter((p) => p.deadline >= k && !items.some((x) => x.plan.id === p.id));
+  if (addable.length) {
+    html += `<div class="d-add"><select id="dayAdd" aria-label="Add a plan to this day"><option value="">+ Add a plan to this day…</option>` +
+      addable.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('') + '</select></div>';
+  }
+  html += `<div class="d-foot"><span class="sum">Planned <b>${fmtShort(total)}</b>${daySummaryExtra(k, items)}</span>` +
+    `<span class="btns"><button id="copyDayBtn" ${items.length && keyAdd(k, 1) >= today ? '' : 'disabled'}>Copy to next day</button>` +
+    `<button id="clearDayBtn" class="danger" ${items.length && !past ? '' : 'disabled'}>Clear day</button></span></div>`;
+  $('dayPanel').innerHTML = html;
+}
+
+// Filled in once plans show progress (step 3).
+function dayStudiedText() { return ''; }
+function daySummaryExtra() { return ''; }
 
 function renderPlanner() {
   planner.selected ??= todayKey();
@@ -1676,6 +1749,7 @@ function renderPlanner() {
   }
   renderPlanList();
   renderCalendar();
+  renderDayPanel();
 }
 
 function selectDay(k) {
@@ -1766,6 +1840,28 @@ function initPlanner() {
   $('calPrev').addEventListener('click', () => moveMonth(-1));
   $('calNext').addEventListener('click', () => moveMonth(1));
   $('calToday').addEventListener('click', () => selectDay(todayKey()));
+  $('dayPanel').addEventListener('click', (e) => {
+    const k = planner.selected;
+    const step = e.target.closest('[data-step]');
+    if (step) {
+      const cur = state.planned[k]?.[step.dataset.plan] || 0;
+      setPlanned(k, step.dataset.plan, cur + Number(step.dataset.step));
+    } else if (e.target.closest('#copyDayBtn')) {
+      const next = copyDayToNext(k);
+      save();
+      return selectDay(next); // show the day it was copied to
+    } else if (e.target.closest('#clearDayBtn')) {
+      delete state.planned[k];
+    } else return;
+    save();
+    renderPlanner();
+  });
+  $('dayPanel').addEventListener('change', (e) => {
+    if (e.target.id !== 'dayAdd' || !e.target.value) return;
+    setPlanned(planner.selected, e.target.value, 60); // starts at 1 h; adjust with − / +
+    save();
+    renderPlanner();
+  });
   $('deletePlanBtn').addEventListener('click', async () => {
     const p = planById(planner.focus);
     if (!p) return;

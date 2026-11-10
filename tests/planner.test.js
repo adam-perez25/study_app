@@ -149,6 +149,84 @@ describe('new plan popup', () => {
   });
 });
 
+describe('hours per day', () => {
+  const dayCell = (k) => app.$('calendar').querySelector(`[data-day="${k}"]`);
+  const change = (el) => el.dispatchEvent(new app.window.Event('change', { bubbles: true }));
+
+  it('rounds planned time to 15-minute steps between 0 and 12 h', () => {
+    app = loadApp({ saved: saved({ plans: [plan()] }) });
+    app.run(`setPlanned('${day(1)}', 'p1', 50)`);
+    expect(app.state.planned[day(1)].p1).toBe(45);
+    app.run(`setPlanned('${day(1)}', 'p1', 2000)`);
+    expect(app.state.planned[day(1)].p1).toBe(720);
+    app.run(`setPlanned('${day(1)}', 'p1', 0)`);
+    expect(app.state.planned[day(1)]).toBeUndefined(); // an empty day is removed
+  });
+
+  it('adds a plan to the selected day, then changes it in 15-minute steps', () => {
+    openPlanner(saved({ plans: [plan()] }));
+    click(dayCell(day(1)));
+    expect(app.$('dayPanel').textContent).toContain('Thursday 29 October');
+    expect(app.$('dayPanel').textContent).toContain('Nothing planned for this day yet.');
+    const add = app.$('dayAdd');
+    add.value = 'p1';
+    change(add);
+    expect(app.saved().planned[day(1)]).toEqual({ p1: 60 });
+    app.$('dayPanel').querySelector('[data-step="15"]').click();
+    app.$('dayPanel').querySelector('[data-step="15"]').click();
+    app.$('dayPanel').querySelector('[data-step="-15"]').click();
+    expect(app.saved().planned[day(1)]).toEqual({ p1: 75 });
+    expect(app.$('dayPanel').textContent).toContain('Planned 1h 15m');
+    expect(dayCell(day(1)).querySelector('.pill').textContent).toBe('1:15');
+    expect(dayCell(day(1)).querySelector('.tot').textContent).toBe('1:15');
+  });
+
+  it('takes a plan off the day when it goes down to 0', () => {
+    openPlanner(saved({ plans: [plan()], planned: { [day(0)]: { p1: 15 } } }));
+    app.$('dayPanel').querySelector('[data-step="-15"]').click();
+    expect(app.saved().planned).toEqual({});
+  });
+
+  it('only offers plans whose deadline is still ahead on that day', () => {
+    openPlanner(saved({ plans: [plan({ deadline: day(2) }), plan({ id: 'p2', subjectId: 's2', name: 'Lab', deadline: day(9) })] }));
+    click(dayCell(day(4))); // Sun 1 Nov, the last cell of October's calendar
+    const options = [...app.$('dayAdd').options].map((o) => o.value).filter(Boolean);
+    expect(options).toEqual(['p2']);
+  });
+
+  it('copies a day to the next one and shows that day', () => {
+    openPlanner(saved({ plans: [plan(), plan({ id: 'p2', subjectId: 's2', deadline: day(1) })], planned: { [day(1)]: { p1: 90, p2: 30 }, [day(2)]: { p2: 15 } } }));
+    click(dayCell(day(1)));
+    app.$('copyDayBtn').click();
+    // p2's deadline is day(1), so it isn't copied past it
+    expect(app.saved().planned[day(2)]).toEqual({ p1: 90 });
+    expect(app.$('dayPanel').textContent).toContain('Friday 30 October');
+  });
+
+  it('clears a day', () => {
+    openPlanner(saved({ plans: [plan()], planned: { [day(1)]: { p1: 90 }, [day(3)]: { p1: 30 } } }));
+    click(dayCell(day(1)));
+    app.$('clearDayBtn').click();
+    expect(app.saved().planned).toEqual({ [day(3)]: { p1: 30 } });
+  });
+
+  it('shows days before today without − / + and without Clear', () => {
+    openPlanner(saved({ plans: [plan()], planned: { [day(-1)]: { p1: 60 } } }));
+    click(dayCell(day(-1)));
+    expect(app.$('dayPanel').textContent).toContain('Past day');
+    expect(app.$('dayPanel').querySelector('[data-step]')).toBeNull();
+    expect(app.$('dayAdd')).toBeNull();
+    expect(app.$('clearDayBtn').disabled).toBe(true);
+  });
+
+  it('fades the other plans on the calendar while one is highlighted', () => {
+    openPlanner(saved({ plans: [plan(), plan({ id: 'p2', subjectId: 's2' })], planned: { [day(1)]: { p1: 60, p2: 30 } } }));
+    click(app.$('planList').querySelector('[data-plan="p2"]'));
+    const pills = [...dayCell(day(1)).querySelectorAll('.pill')];
+    expect(pills.map((p) => p.classList.contains('faded'))).toEqual([true, false]);
+  });
+});
+
 describe('deleting', () => {
   it('deletes a plan and the hours planned for it, after asking', async () => {
     openPlanner(saved({ plans: [plan(), plan({ id: 'p2', subjectId: 's2' })], planned: { [day(1)]: { p1: 60, p2: 30 }, [day(2)]: { p1: 45 } } }));
