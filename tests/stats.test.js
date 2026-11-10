@@ -229,13 +229,29 @@ describe('all levels popup', () => {
     const dlg = app.$('levelsDialog');
     expect(dlg.open).toBe(true);
 
-    dlg.querySelector('.lv').click(); // inside
-    expect(dlg.open).toBe(true);
+    const press = (el, x, y) => {
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
+      // The click of a press that started inside and ended on the backdrop lands on the dialog.
+      dlg.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x, clientY: y }));
+    };
     dlg.getBoundingClientRect = () => ({ left: 100, right: 500, top: 100, bottom: 600 });
-    dlg.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 300, clientY: 300 })); // padding, inside the box
+    dlg.querySelector('.lv').click(); // a row inside
     expect(dlg.open).toBe(true);
-    dlg.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 20, clientY: 20 })); // backdrop
+    press(dlg, 300, 300); // on the dialog, but inside its box
+    expect(dlg.open).toBe(true);
+    press(dlg.querySelector('.lv'), 20, 20); // text selection dragged out to the backdrop
+    expect(dlg.open).toBe(true);
+    press(dlg, 20, 20); // backdrop
     expect(dlg.open).toBe(false);
+  });
+
+  it('Space on the card opens the popup without pausing the session', () => {
+    app = loadApp();
+    app.run('startSession()');
+    app.run("show('stats')");
+    app.$('levelCard').dispatchEvent(new app.window.KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true }));
+    expect(app.$('levelsDialog').open).toBe(true);
+    expect(app.state.session.pausedRemaining).toBeNull();
   });
 });
 

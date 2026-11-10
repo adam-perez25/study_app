@@ -1517,8 +1517,11 @@ function initLevels() {
   });
   $('levelsClose').addEventListener('click', () => dlg.close());
   // A click on the backdrop lands on the <dialog> itself, so only close when it's outside the box.
+  // The press must start there too, so dragging a text selection out of the popup doesn't close it.
+  let pressedOnBackdrop = false;
+  dlg.addEventListener('mousedown', (e) => { pressedOnBackdrop = e.target === dlg; });
   dlg.addEventListener('click', (e) => {
-    if (e.target !== dlg) return;
+    if (e.target !== dlg || !pressedOnBackdrop) return;
     const r = dlg.getBoundingClientRect();
     if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
   });
