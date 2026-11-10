@@ -1649,6 +1649,18 @@ function copyDayToNext(k) {
   return next;
 }
 
+// Minutes studied toward a plan on a day: time with its subject, from the day the plan was made until its deadline.
+function planStudiedOn(plan, k, history = state.history) {
+  if (k < plan.created || k > plan.deadline) return 0;
+  return (history[k]?.[plan.subjectId] || 0) / 60000;
+}
+function planStudied(plan, history = state.history) {
+  return Object.keys(history).reduce((a, k) => a + planStudiedOn(plan, k, history), 0);
+}
+function planPlanned(plan, planned = state.planned) {
+  return Object.values(planned).reduce((a, day) => a + (day[plan.id] || 0), 0);
+}
+
 // Removes a plan and every hour planned for it.
 function removePlan(id) {
   state.plans = state.plans.filter((p) => p.id !== id);
@@ -1671,8 +1683,15 @@ function renderPlanList() {
     card.style.setProperty('--c', color);
     card.setAttribute('aria-pressed', planner.focus === p.id);
     card.title = 'Click to highlight this plan on the calendar';
+    const studied = planStudied(p), planned = planPlanned(p), unplanned = p.needMin - planned;
+    const status = studied >= p.needMin ? '<span class="pl-stat ok">🎉 Done: you studied all the hours</span>'
+      : left < 0 ? `<span class="pl-stat">Deadline passed with ${fmtShort(p.needMin - studied)} left</span>`
+      : unplanned > 0 ? `<span class="pl-stat warn">⚠ ${fmtShort(unplanned)} still unplanned</span>`
+      : '<span class="pl-stat ok">✓ Fully planned</span>';
     card.innerHTML = `<span class="pl-name"><span class="dot" style="background:${color}"></span>${escapeHtml(p.name)}</span>` +
-      `<span class="pl-meta">${p.type} · ${escapeHtml(subjectName(p.subjectId))} · due ${fmtDayShort(p.deadline)} (${due})</span>`;
+      `<span class="pl-meta">${p.type} · ${escapeHtml(subjectName(p.subjectId))} · due ${fmtDayShort(p.deadline)} (${due})</span>` +
+      `<span class="meter"><span class="meter-fill" style="width:${Math.min(100, (studied / p.needMin) * 100)}%"></span></span>` +
+      `<span class="pl-num">${fmtShort(studied)} studied of ${fmtShort(p.needMin)} · ${fmtShort(planned)} planned</span>${status}`;
     el.appendChild(card);
   }
   const focused = planById(planner.focus);
@@ -1705,10 +1724,15 @@ function renderCalendar() {
   }
 }
 
-// The total under a calendar day: what's planned (and, from step 3, what was studied).
+// The total under a calendar day: what's planned, and up to today what was studied for those plans.
+// A past day shows in amber when less was studied than planned.
 function dayTotalHtml(k, items) {
   const planned = items.reduce((a, x) => a + x.min, 0);
-  return planned ? `<span class="tot">${fmtHM(planned)}</span>` : '';
+  if (!planned) return '';
+  const today = todayKey();
+  if (k > today) return `<span class="tot">${fmtHM(planned)}</span>`;
+  const studied = items.reduce((a, x) => a + planStudiedOn(x.plan, k), 0);
+  return `<span class="tot${k < today && studied < planned ? ' short' : ''}" title="Studied / planned">${fmtHM(studied)} / ${fmtHM(planned)}</span>`;
 }
 
 function renderDayPanel() {
@@ -1737,9 +1761,16 @@ function renderDayPanel() {
   $('dayPanel').innerHTML = html;
 }
 
-// Filled in once plans show progress (step 3).
-function dayStudiedText() { return ''; }
-function daySummaryExtra() { return ''; }
+// What was studied for a plan on a day (nothing to show for days still ahead).
+function dayStudiedText(plan, k) {
+  if (k > todayKey()) return '';
+  const min = planStudiedOn(plan, k);
+  return min >= 1 ? `${fmtShort(min)} studied` : 'not studied';
+}
+function daySummaryExtra(k, items) {
+  if (k > todayKey()) return '';
+  return ` · Studied <b>${fmtShort(items.reduce((a, x) => a + planStudiedOn(x.plan, k), 0))}</b>`;
+}
 
 function renderPlanner() {
   planner.selected ??= todayKey();

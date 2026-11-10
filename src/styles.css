@@ -9,6 +9,7 @@
   --long: #3b7dd8;
   --accent: var(--focus);
   --danger: #c0392b;
+  --warn: #b7791f; /* planner: plans or days that fall short */
   --radius: 12px;
   /* Subject colours: a fixed, colourblind-checked categorical order. A subject keeps its slot. */
   --subj-0: #2a78d6;
@@ -41,6 +42,7 @@
     --subj-6: #9085e9;
     --subj-7: #e66767;
     --subj-none: #6b7280;
+    --warn: #e0a64a;
     color-scheme: dark;
   }
 }
@@ -59,6 +61,7 @@
   --subj-6: #9085e9;
   --subj-7: #e66767;
   --subj-none: #6b7280;
+  --warn: #e0a64a;
   color-scheme: dark;
 }
 
@@ -449,6 +452,12 @@ body.paused .time { opacity: .5; }
 .pl-card.on { border-color: var(--c); box-shadow: inset 0 0 0 1px var(--c); }
 .pl-name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
 .pl-meta { color: var(--muted); font-size: .8rem; }
+.pl-card .meter, .pl-card .meter-fill { display: block; }
+.pl-card .meter-fill { background: var(--c); }
+.pl-num { font-size: .82rem; font-variant-numeric: tabular-nums; }
+.pl-stat { font-size: .8rem; font-weight: 600; color: var(--muted); }
+.pl-stat.ok { color: var(--break); }
+.pl-stat.warn { color: var(--warn); }
 .pl-aside-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .pl-aside-actions .summary { margin: 0; font-size: .82rem; }
 .cal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -473,6 +482,7 @@ body.paused .time { opacity: .5; }
 }
 .pill.faded { opacity: .25; }
 .cell .tot { margin-top: auto; font-size: .68rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cell .tot.short { color: var(--warn); font-weight: 600; }
 @media (max-width: 520px) {
   .cal .cell { min-height: 60px; padding: 3px; }
   .pill { height: 6px; padding: 0; border-left: none; background: var(--c); font-size: 0; } /* just a coloured line */

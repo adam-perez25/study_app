@@ -227,6 +227,65 @@ describe('hours per day', () => {
   });
 });
 
+describe('progress', () => {
+  const dayCell = (k) => app.$('calendar').querySelector(`[data-day="${k}"]`);
+  // p1 runs from day(-5) to day(10) for Maths (s1)
+  const history = {
+    [day(-9)]: { s1: 120 * MIN },              // before the plan was made: doesn't count
+    [day(-2)]: { s1: 45 * MIN, s2: 30 * MIN }, // only the Maths part counts
+    [day(0)]: { s1: 20 * MIN },
+  };
+
+  it('counts the time studied with the plan subject, from the day it was made to its deadline', () => {
+    app = loadApp({ saved: saved({ plans: [plan()], history }) });
+    expect(app.run(`planStudied(planById('p1'))`)).toBe(65);
+    expect(app.run(`planStudiedOn(planById('p1'), '${day(-9)}')`)).toBe(0);
+    expect(app.run(`planStudied({ ...planById('p1'), deadline: '${day(-1)}' })`)).toBe(45); // after the deadline doesn't count
+  });
+
+  it('adds up the hours planned for a plan', () => {
+    app = loadApp({ saved: saved({ plans: [plan()], planned: { [day(1)]: { p1: 60 }, [day(2)]: { p1: 90, p2: 30 } } }) });
+    expect(app.run(`planPlanned(planById('p1'))`)).toBe(150);
+  });
+
+  it('shows studied, needed and planned hours, and warns when the plan is short', () => {
+    openPlanner(saved({ plans: [plan()], history, planned: { [day(1)]: { p1: 120 } } }));
+    const card = app.$('planList').querySelector('[data-plan="p1"]');
+    expect(card.querySelector('.pl-num').textContent).toBe('1h 5m studied of 10h · 2h planned');
+    expect(card.querySelector('.meter-fill').style.width).toBe(`${(65 / 600) * 100}%`);
+    expect(card.querySelector('.pl-stat').textContent).toBe('⚠ 8h still unplanned');
+  });
+
+  it('says when a plan is fully planned, done, or past its deadline', () => {
+    const planned = { [day(1)]: { p1: 600 } };
+    openPlanner(saved({ plans: [plan()], history, planned }));
+    expect(app.$('planList').querySelector('.pl-stat').textContent).toBe('✓ Fully planned');
+    app.close();
+    openPlanner(saved({ plans: [plan({ needMin: 60 })], history }));
+    expect(app.$('planList').querySelector('.pl-stat').textContent).toContain('Done');
+    app.close();
+    openPlanner(saved({ plans: [plan({ deadline: day(-1) })], history }));
+    expect(app.$('planList').querySelector('.pl-stat').textContent).toBe('Deadline passed with 9h 15m left');
+  });
+
+  it('shows studied / planned on past days and today, and marks days that fell short', () => {
+    openPlanner(saved({ plans: [plan()], history, planned: { [day(-2)]: { p1: 60 }, [day(-1)]: { p1: 30 }, [day(0)]: { p1: 15 }, [day(1)]: { p1: 45 } } }));
+    expect(dayCell(day(-2)).querySelector('.tot').textContent).toBe('45m / 1h');
+    expect(dayCell(day(-2)).querySelector('.tot').classList.contains('short')).toBe(true);
+    expect(dayCell(day(-1)).querySelector('.tot').textContent).toBe('0m / 30m');
+    expect(dayCell(day(0)).querySelector('.tot').textContent).toBe('20m / 15m');
+    expect(dayCell(day(0)).querySelector('.tot').classList.contains('short')).toBe(false); // today isn't over yet
+    expect(dayCell(day(1)).querySelector('.tot').textContent).toBe('45m'); // still ahead
+  });
+
+  it('shows what was studied for each plan in the day panel', () => {
+    openPlanner(saved({ plans: [plan()], history, planned: { [day(-2)]: { p1: 60 } } }));
+    click(dayCell(day(-2)));
+    expect(app.$('dayPanel').querySelector('.st').textContent).toBe('45m studied');
+    expect(app.$('dayPanel').querySelector('.sum').textContent).toBe('Planned 1h · Studied 45m');
+  });
+});
+
 describe('deleting', () => {
   it('deletes a plan and the hours planned for it, after asking', async () => {
     openPlanner(saved({ plans: [plan(), plan({ id: 'p2', subjectId: 's2' })], planned: { [day(1)]: { p1: 60, p2: 30 }, [day(2)]: { p1: 45 } } }));
