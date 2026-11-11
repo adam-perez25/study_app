@@ -89,5 +89,6 @@ The tests use [Vitest](https://vitest.dev/) and load `src/index.html` and `src/a
 
 - **Sync across devices:** needs a server or a shared cloud folder, so it waits until the backup feature exists.
 - **Plan review:** when a deadline passes, show a recap with planned versus studied time and whether the plan was done or missed.
+- **Ranking:** a leaderboard to compare your study time with other people. It needs a login and a server, so it waits until sync exists.
 
 Suggested order: backup, planner nudges, plan checklist, planner reminders, pull tasks into sessions.
