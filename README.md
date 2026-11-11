@@ -79,4 +79,16 @@ The tests use [Vitest](https://vitest.dev/) and load `src/index.html` and `src/a
 
 ## Roadmap
 
-Nothing planned right now. Ideas are welcome.
+- **Backup (export and import):** all your data lives in one localStorage key (`study-timer-v1`), so wiping `%APPDATA%\study-timer` or changing computers loses it. Add two buttons in Settings: "Export data" saves the whole `state` as a JSON file (through a save dialog in main, like `share:save-image`), and "Import data" reads one back, checks it looks like a Study Timer backup, asks to confirm, and replaces the current data. Run the same `??=` migration after importing. Test the validation as a pure function.
+- **Planner nudges:** the planner only shows numbers when you open it. Show "behind by 40 min" and "3 days left" on the Today's plan card and on each plan row, using data that already exists (`planMissing`, `planStudied`, the deadline). Keep the maths in a pure function with tests, because planner reminders will reuse it.
+- **Plan checklist for topics:** give each plan an optional list of topics or chapters (for example "Unit 3 - Waves") that you tick off, with "3/8 topics" shown next to the time bar. Add a `topics` field to `plans` with a `??=` default and a small editor in the plan form.
+- **Planner reminders:** a Windows notification when the app starts, or at a time you choose, such as "Exam in 3 days, you're 2h behind". Needs a reminder setting and a check in the main process. Build it after planner nudges, which provide the "behind" calculation.
+- **Pull tasks into sessions:** when you start a session for a plan, offer its unticked topics as tasks for the session task list, and tick the topic off the plan when you tick the task. Build it after the plan checklist.
+
+### Later
+
+- **Sync across devices:** needs a server or a shared cloud folder, so it waits until the backup feature exists.
+- **Plan review:** when a deadline passes, show a recap with planned versus studied time and whether the plan was done or missed.
+- **Ranking:** a leaderboard to compare your study time with other people. It needs a login and a server, so it waits until sync exists.
+
+Suggested order: backup, planner nudges, plan checklist, planner reminders, pull tasks into sessions.
