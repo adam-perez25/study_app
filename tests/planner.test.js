@@ -352,7 +352,7 @@ describe("today's plan on the start screen", () => {
     app = loadApp({ saved: saved({ ...today(), history: { [day(0)]: { s1: 25 * MIN } }, planHistory: { [day(0)]: { p1: 25 * MIN } } }) });
     expect(app.$('todayPlanCard').hidden).toBe(false);
     const rows = [...app.$('todayPlanList').querySelectorAll('.tp-row')].map((r) => r.textContent);
-    expect(rows).toEqual(['Calculus exam1 h 30 min25m done', 'Lab report45 minnot started']);
+    expect(rows).toEqual(['Calculus exam1 h 5 min25m done', 'Lab report45 minnot started']);
   });
 
   it('fills in the time and subject when you pick one, and highlights it', () => {
@@ -367,6 +367,21 @@ describe("today's plan on the start screen", () => {
     app.$('minutes').value = '50';
     app.$('minutes').dispatchEvent(new app.window.Event('input'));
     expect(app.$('todayPlanList').querySelector('.selected')).toBeNull();
+  });
+
+  it('fills in only the time left when part of the day is already done', () => {
+    app = loadApp({ saved: saved({ ...today(), planHistory: { [day(0)]: { p1: 25 * MIN } } }) });
+    app.$('todayPlanList').querySelector('[data-plan="p1"]').click();
+    expect(app.$('hours').value).toBe('1');
+    expect(app.$('minutes').value).toBe('5');
+    expect(app.$('todayPlanList').querySelector('.selected').dataset.plan).toBe('p1');
+  });
+
+  it('offers the full time again once the day plan is done', () => {
+    app = loadApp({ saved: saved({ ...today(), planHistory: { [day(0)]: { p1: 95 * MIN } } }) });
+    app.$('todayPlanList').querySelector('[data-plan="p1"]').click();
+    expect(app.$('hours').value).toBe('1');
+    expect(app.$('minutes').value).toBe('30');
   });
 
   it('shows what you planned in the Planner when you come back', () => {

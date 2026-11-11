@@ -1974,6 +1974,13 @@ function todaysPlans() {
   return plannedOn(today).filter(({ plan }) => plan.deadline >= today && subjectById(plan.subjectId) && !subjectById(plan.subjectId).hidden);
 }
 
+// Minutes still to do today for a plan: what was planned minus what's already studied toward it.
+// Once today's time is all done, the full planned time is offered again (for an extra session).
+function todayRemaining(plan, min) {
+  const left = Math.round(min - planStudiedOn(plan, todayKey()));
+  return left > 0 ? left : min;
+}
+
 function renderTodayPlan() {
   const items = todaysPlans(), today = todayKey();
   $('todayPlanCard').hidden = !items.length;
@@ -1984,13 +1991,14 @@ function renderTodayPlan() {
     const done = planStudiedOn(plan, today), color = subjectColor(plan.subjectId);
     const row = document.createElement('button');
     // Highlighted while the start screen is set to exactly this plan.
-    const picked = currentPlanId() === plan.id && total === min;
+    const left = todayRemaining(plan, min);
+    const picked = currentPlanId() === plan.id && total === left;
     row.className = 'tp-row' + (picked ? ' selected' : '');
     row.dataset.plan = plan.id;
     row.style.setProperty('--c', color);
     row.setAttribute('aria-pressed', picked);
     row.innerHTML = `<span class="dot" style="background:${color}"></span><span class="tp-name">${escapeHtml(plan.name)}</span>` +
-      `<span class="tp-time">${fmtMinutes(min)}</span><span class="tp-done">${done >= 1 ? `${fmtShort(done)} done` : 'not started'}</span>`;
+      `<span class="tp-time">${fmtMinutes(left)}</span><span class="tp-done">${done >= 1 ? `${fmtShort(done)} done` : 'not started'}</span>`;
     el.appendChild(row);
   }
 }
@@ -1999,8 +2007,9 @@ function renderTodayPlan() {
 function pickTodayPlan(id) {
   const item = todaysPlans().find((x) => x.plan.id === id);
   if (!item) return;
-  $('hours').value = Math.floor(item.min / 60);
-  $('minutes').value = item.min % 60;
+  const left = todayRemaining(item.plan, item.min);
+  $('hours').value = Math.floor(left / 60);
+  $('minutes').value = left % 60;
   state.settings.subjectId = item.plan.subjectId;
   state.settings.planId = item.plan.id;
   updatePreview(); // saves, and redraws this card
