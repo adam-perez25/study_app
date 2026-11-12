@@ -256,7 +256,7 @@ describe('hours per day', () => {
     expect(app.$('dayPanel').textContent).toContain('Friday 30 October');
   });
 
-  it('clears a day', () => {
+  it('Reset day clears a plan you plan by hand', () => {
     openPlanner(saved({ plans: [plan()], planned: { [day(1)]: { p1: 90 }, [day(3)]: { p1: 30 } } }));
     click(dayCell(day(1)));
     app.$('clearDayBtn').click();
@@ -540,18 +540,6 @@ describe('keeping plans balanced', () => {
     expect(ahead()).toBe(600);
   });
 
-  it('a cleared day stays free, and unpinning it lets it adjust again', () => {
-    openPlanner(saved({ plans: [auto()] }));
-    click(app.$('calendar').querySelector(`[data-day="${day(1)}"]`));
-    app.$('clearDayBtn').click();
-    expect(minutes([1])).toEqual([0]);
-    expect(ahead()).toBe(600); // the other 7 days took its time
-    const pin = app.$('dayPanel').querySelector('[data-unpin="p1"]'); // still listed, pinned at 0
-    expect(pin.textContent).toBe('📌');
-    pin.click();
-    expect(minutes(weekdays)).toEqual(Array(8).fill(75));
-  });
-
   it('marks pinned days with 📌 and the others with auto', () => {
     openPlanner(saved({ plans: [auto()] }));
     expect(app.$('dayPanel').querySelector('.d-auto').textContent).toBe('auto');
@@ -632,16 +620,21 @@ describe('keeping plans balanced', () => {
 describe('deleting', () => {
   it('deletes a plan and the hours planned for it, after asking', async () => {
     openPlanner(saved({ plans: [plan(), plan({ id: 'p2', subjectId: 's2' })], planned: { [day(1)]: { p1: 60, p2: 30 }, [day(2)]: { p1: 45 } } }));
-    expect(app.$('deletePlanBtn').hidden).toBe(true);
-    click(app.$('planList').querySelector('[data-plan="p1"]'));
-    expect(app.$('deletePlanBtn').hidden).toBe(false);
-    app.$('deletePlanBtn').click();
+    app.$('planList').querySelector('[data-act="delete"][data-id="p1"]').click(); // no need to select the plan first
     expect(app.$('confirmDialog').open).toBe(true);
+    expect(app.$('confirmTitle').textContent).toBe('Delete “Calculus exam”?');
     app.$('confirmYes').click();
     await Promise.resolve();
     expect(app.saved().plans.map((p) => p.id)).toEqual(['p2']);
     expect(app.saved().planned).toEqual({ [day(1)]: { p2: 30 } });
-    expect(app.$('deletePlanBtn').hidden).toBe(true);
+  });
+
+  it('keeps the plan when the question is cancelled', async () => {
+    openPlanner(saved({ plans: [plan()], planned: { [day(1)]: { p1: 60 } } }));
+    app.$('planList').querySelector('[data-act="delete"][data-id="p1"]').click();
+    app.$('confirmNo').click();
+    await Promise.resolve();
+    expect(app.state.plans).toHaveLength(1);
   });
 
   it('deletes the plans of a deleted subject', async () => {
@@ -654,5 +647,478 @@ describe('deleting', () => {
     expect(app.saved().plans).toEqual([]);
     expect(app.saved().planned).toEqual({});
     expect(app.saved().history[day(-1)]).toEqual({ s1: 30 * MIN }); // the time studied stays, under the deleted subject
+  });
+});
+
+describe('weekends and days off', () => {
+  const auto = (extra = {}) => plan({ auto: true, ...extra });
+  const weekdays = [0, 1, 2, 5, 6, 7, 8, 9];
+  const minutes = (ns) => ns.map((n) => app.state.planned[day(n)]?.p1 ?? 0);
+  const dayCell = (k) => app.$('calendar').querySelector(`[data-day="${k}"]`);
+
+  it('a plan with weekends on uses every day, with the same time on weekends', () => {
+    app = loadApp({ saved: saved({ plans: [auto({ weekends: true })] }) });
+    // 11 days from Wed 28 Oct to Sat 7 Nov: 40 pieces of 15 min, so 7 days of 1 h and 4 of 45 min
+    expect(minutes([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])).toEqual([60, 60, 60, 60, 60, 60, 60, 45, 45, 45, 45]);
+    expect(minutes([3, 4])).toEqual([60, 60]); // Saturday and Sunday count like any day
+  });
+
+  it('weekends are ignored by a plan that is not balanced', () => {
+    app = loadApp({ saved: saved({ plans: [plan({ weekends: true })] }) });
+    expect(app.run(`rebalancePlan(planById('p1'))`)).toBe(false);
+    expect(plain(app.state.planned)).toEqual({});
+  });
+
+  it('a day off is skipped, and the other days take its time', () => {
+    app = loadApp({ saved: saved({ plans: [auto()], daysOff: [day(1)] }) });
+    expect(minutes(weekdays)).toEqual([90, 0, 90, 90, 90, 90, 75, 75]);
+    app.run(`setDayOff('${day(1)}', false)`);
+    expect(minutes(weekdays)).toEqual(Array(8).fill(75));
+    expect(plain(app.state.daysOff)).toEqual([]);
+  });
+
+  it('a day off keeps what you set by hand there', () => {
+    app = loadApp({ saved: saved({
+      plans: [auto({ pinned: [day(1)] }), plan({ id: 'p2', subjectId: 's2' })],
+      planned: { [day(1)]: { p1: 45, p2: 30 } }, daysOff: [day(1)],
+    }) });
+    expect(plain(app.state.planned[day(1)])).toEqual({ p1: 45, p2: 30 });
+  });
+
+  it('Day off marks the day on the calendar, and the button brings it back', () => {
+    openPlanner(saved({ plans: [auto()] }));
+    click(dayCell(day(1)));
+    expect(app.$('dayOffBtn').textContent).toBe('Day off');
+    app.$('dayOffBtn').click();
+    expect(app.saved().daysOff).toEqual([day(1)]);
+    expect(dayCell(day(1)).classList.contains('dayoff')).toBe(true);
+    expect(dayCell(day(1)).textContent).toContain('Day off');
+    expect(minutes([1])).toEqual([0]);
+    expect(app.$('dayPanel').textContent).toContain('Balanced plans skip this day');
+    expect(app.$('dayOffBtn').textContent).toBe('Use this day again');
+    app.$('dayOffBtn').click();
+    expect(app.saved().daysOff).toEqual([]);
+    expect(minutes([1])).toEqual([75]);
+  });
+
+  it('a past day cannot be marked as a day off', () => {
+    openPlanner(saved({ plans: [plan()] }));
+    click(dayCell(day(-1)));
+    expect(app.$('dayOffBtn').disabled).toBe(true);
+  });
+
+  it('drops days off that have passed when the app starts', () => {
+    app = loadApp({ saved: saved({ daysOff: [day(-2), day(1)] }) });
+    expect(plain(app.state.daysOff)).toEqual([day(1)]);
+  });
+
+  it('adds an empty list of days off to saved data from older versions', () => {
+    app = loadApp({ saved: saved() });
+    expect(plain(app.state.daysOff)).toEqual([]);
+  });
+});
+
+describe('resetting a day', () => {
+  const auto = (extra = {}) => plan({ auto: true, ...extra });
+  const weekdays = [0, 1, 2, 5, 6, 7, 8, 9];
+  const minutes = (ns) => ns.map((n) => app.state.planned[day(n)]?.p1 ?? 0);
+  const dayCell = (k) => app.$('calendar').querySelector(`[data-day="${k}"]`);
+
+  it('unpins a balanced plan, so the day is balanced again', () => {
+    openPlanner(saved({ plans: [auto()] }));
+    click(dayCell(day(1)));
+    app.$('dayPanel').querySelector('[data-step="15"]').click(); // pinned at 1:30
+    expect(minutes([1])).toEqual([90]);
+    app.$('clearDayBtn').click();
+    expect(app.run(`isPinned(planById('p1'), '${day(1)}')`)).toBe(false);
+    expect(minutes(weekdays)).toEqual(Array(8).fill(75));
+  });
+
+  it('frees a day that was pinned at 0', () => {
+    openPlanner(saved({ plans: [auto()] }));
+    app.run(`setByHand('${day(1)}', 'p1', 0)`);
+    click(dayCell(day(1)));
+    expect(minutes([1])).toEqual([0]);
+    app.$('clearDayBtn').click();
+    expect(minutes(weekdays)).toEqual(Array(8).fill(75));
+  });
+
+  it('says so when nothing was set by hand, and changes nothing', () => {
+    openPlanner(saved({ plans: [auto()] }));
+    const before = JSON.stringify(app.state.planned);
+    expect(app.$('clearDayBtn').disabled).toBe(false);
+    app.$('clearDayBtn').click();
+    expect(app.$('dayPanel').textContent).toContain('Nothing set by hand on this day. Use Day off to keep it free.');
+    expect(JSON.stringify(app.state.planned)).toBe(before);
+    click(dayCell(day(1))); // the note goes away
+    expect(app.$('dayPanel').textContent).not.toContain('Nothing set by hand');
+  });
+
+  it('leaves a day off as it is', () => {
+    openPlanner(saved({ plans: [auto()], daysOff: [day(1)] }));
+    app.run(`setByHand('${day(1)}', 'p1', 30)`);
+    click(dayCell(day(1)));
+    app.$('clearDayBtn').click();
+    expect(app.saved().daysOff).toEqual([day(1)]);
+    expect(minutes([1])).toEqual([0]); // and balanced plans keep skipping it
+  });
+
+  it('is off for days before today', () => {
+    openPlanner(saved({ plans: [plan()], planned: { [day(-1)]: { p1: 60 } } }));
+    click(dayCell(day(-1)));
+    expect(app.$('clearDayBtn').disabled).toBe(true);
+  });
+});
+
+describe('editing a plan', () => {
+  const auto = (extra = {}) => plan({ auto: true, ...extra });
+  const weekdays = [0, 1, 2, 5, 6, 7, 8, 9];
+  const minutes = (ns) => ns.map((n) => app.state.planned[day(n)]?.p1 ?? 0);
+  const edit = (id = 'p1') => app.$('planList').querySelector(`[data-act="edit"][data-id="${id}"]`).click();
+  const input = (el) => el.dispatchEvent(new app.window.Event('input', { bubbles: true }));
+  const change = (el) => el.dispatchEvent(new app.window.Event('change', { bubbles: true }));
+
+  it('gives every card its own Edit and Delete buttons', () => {
+    openPlanner(saved({ plans: [plan(), plan({ id: 'p2', subjectId: 's2' })] }));
+    for (const id of ['p1', 'p2']) {
+      expect(app.$('planList').querySelector(`[data-act="edit"][data-id="${id}"]`)).not.toBeNull();
+      expect(app.$('planList').querySelector(`[data-act="delete"][data-id="${id}"]`)).not.toBeNull();
+    }
+    expect(app.$('deletePlanBtn')).toBeNull(); // the old button under the list is gone
+  });
+
+  it('opens the popup filled in with the plan', () => {
+    openPlanner(saved({ plans: [auto({ weekends: true })] }));
+    edit();
+    expect(app.$('planDialog').open).toBe(true);
+    expect(app.$('planFormTitle').textContent).toBe('Edit plan');
+    expect(app.$('planSubmit').textContent).toBe('Save changes');
+    expect(app.$('planName').value).toBe('Calculus exam');
+    expect(app.$('planDeadline').value).toBe(day(10));
+    expect(app.$('planHours').value).toBe('10');
+    expect(app.$('planAutoFill').checked).toBe(true);
+    expect(app.$('planWeekends').checked).toBe(true);
+    expect(app.$('planSubjects').querySelector('.selected').dataset.subject).toBe('s1');
+  });
+
+  it('a new plan still opens blank after editing one', () => {
+    openPlanner(saved({ plans: [plan()] }));
+    edit();
+    app.$('planDialog').close();
+    app.$('newPlanBtn').click();
+    expect(app.$('planFormTitle').textContent).toBe('New plan');
+    expect(app.$('planSubmit').textContent).toBe('Save plan');
+    expect(app.$('planName').value).toBe('');
+    expect(app.$('planWeekends').checked).toBe(false);
+  });
+
+  it('saves the changes to the same plan', () => {
+    openPlanner(saved({ plans: [plan()] }));
+    edit();
+    app.$('planName').value = 'Calculus final';
+    app.$('planType').querySelector('[data-type="Project"]').click();
+    app.$('planSubjects').querySelector('[data-subject="s2"]').click();
+    app.$('planHours').value = '12';
+    submit(app.$('planForm'));
+    expect(app.$('planDialog').open).toBe(false);
+    expect(app.saved().plans).toHaveLength(1);
+    expect(app.saved().plans[0]).toMatchObject({ id: 'p1', name: 'Calculus final', type: 'Project', subjectId: 's2', needMin: 720, created: day(-5) });
+  });
+
+  it('keeps the subject once the plan has study time', () => {
+    openPlanner(saved({ plans: [plan()], planHistory: { [day(-1)]: { p1: 20 * MIN } } }));
+    edit();
+    const chip = app.$('planSubjects').querySelector('[data-subject="s2"]');
+    expect(chip.disabled).toBe(true);
+    expect(chip.title).toContain('already has study time');
+    expect(app.$('planSubjects').querySelector('.selected').dataset.subject).toBe('s1');
+  });
+
+  it('keeps the subject while a session counts toward the plan', () => {
+    openPlanner(saved({ plans: [plan()] }));
+    app.run(`state.session = { planId: 'p1' }`);
+    edit();
+    const chip = app.$('planSubjects').querySelector('[data-subject="s2"]');
+    expect(chip.disabled).toBe(true);
+    expect(chip.title).toContain('while a session counts toward this plan');
+  });
+
+  it('does not let the hours needed drop below what you studied', () => {
+    openPlanner(saved({ plans: [plan()], planHistory: { [day(-1)]: { p1: 120 * MIN } } }));
+    edit();
+    app.$('planHours').value = '1';
+    submit(app.$('planForm'));
+    expect(app.$('planError').textContent).toBe('You’ve already studied 2h on this plan, so the hours needed can’t be lower.');
+    expect(app.$('planDialog').open).toBe(true);
+    expect(app.state.plans[0].needMin).toBe(600);
+  });
+
+  it('moving the deadline earlier says what it removes, then removes what you planned after it', () => {
+    openPlanner(saved({ plans: [plan()], planned: { [day(1)]: { p1: 60 }, [day(5)]: { p1: 90 }, [day(8)]: { p1: 30 } } }));
+    edit();
+    app.$('planDeadline').value = day(6);
+    input(app.$('planDeadline'));
+    expect(app.$('planDeadlineHint').hidden).toBe(false);
+    expect(app.$('planDeadlineHint').textContent).toBe('30m you planned after this date will be removed.');
+    submit(app.$('planForm'));
+    expect(app.saved().plans[0].deadline).toBe(day(6));
+    expect(app.saved().planned).toEqual({ [day(1)]: { p1: 60 }, [day(5)]: { p1: 90 } });
+  });
+
+  it('a balanced plan moved to an earlier deadline spreads again, with no warning', () => {
+    openPlanner(saved({ plans: [auto()] }));
+    edit();
+    app.$('planDeadline').value = day(6); // Tue 3 Nov: 5 weekdays left (28, 29, 30 Oct, 2 and 3 Nov)
+    input(app.$('planDeadline'));
+    expect(app.$('planDeadlineHint').hidden).toBe(true);
+    submit(app.$('planForm'));
+    expect(minutes([0, 1, 2, 5, 6])).toEqual(Array(5).fill(120));
+    expect(minutes([7, 8, 9])).toEqual([0, 0, 0]);
+  });
+
+  it('moving the deadline later gives a balanced plan more days', () => {
+    openPlanner(saved({ plans: [auto()] }));
+    edit();
+    app.$('planDeadline').value = day(17); // Sat 14 Nov
+    submit(app.$('planForm'));
+    expect(minutes([12])[0]).toBeGreaterThan(0); // Mon 9 Nov
+    expect(app.run(`plannedFrom(planById('p1'))`)).toBe(600);
+  });
+
+  it('lets you rename an expired plan without moving its date, and not move it to the past', () => {
+    openPlanner(saved({ plans: [plan({ deadline: day(-2) })], planHistory: { [day(-4)]: { p1: 100 * MIN } } }));
+    edit();
+    expect(app.$('planDeadline').value).toBe(day(-2));
+    app.$('planName').value = 'Calculus retake';
+    submit(app.$('planForm'));
+    expect(app.$('planError').textContent).toBe('');
+    expect(app.saved().plans[0].name).toBe('Calculus retake');
+    edit();
+    app.$('planDeadline').value = day(-1);
+    submit(app.$('planForm'));
+    expect(app.$('planError').textContent).toBe('The deadline can’t be before today.');
+  });
+
+  it('extending the deadline of an expired plan makes it active again', () => {
+    openPlanner(saved({ plans: [plan({ deadline: day(-2) })], planHistory: { [day(-4)]: { p1: 100 * MIN } } }));
+    expect(app.run(`activePlans('s1').length`)).toBe(0);
+    edit();
+    app.$('planDeadline').value = day(5);
+    submit(app.$('planForm'));
+    expect(app.run(`activePlans('s1').length`)).toBe(1);
+    expect(app.$('planList').querySelector('.pl-finished')).toBeNull();
+  });
+
+  it('turning balancing on keeps the days you set by hand', () => {
+    openPlanner(saved({ plans: [plan()], planned: { [day(1)]: { p1: 60 }, [day(2)]: { p1: 45 } } }));
+    edit();
+    app.$('planAutoFill').checked = true;
+    submit(app.$('planForm'));
+    const p = app.saved().plans[0];
+    expect(p.auto).toBe(true);
+    expect([...p.pinned].sort()).toEqual([day(1), day(2)]);
+    expect(app.saved().planned[day(1)].p1).toBe(60);
+    expect(app.saved().planned[day(2)].p1).toBe(45);
+    expect(app.run(`plannedFrom(planById('p1'))`)).toBe(600); // and the rest was spread around them
+  });
+
+  it('turning balancing off keeps the planned days as they are, now by hand', () => {
+    openPlanner(saved({ plans: [auto()] }));
+    const before = JSON.stringify(app.state.planned);
+    edit();
+    app.$('planAutoFill').checked = false;
+    submit(app.$('planForm'));
+    const p = app.saved().plans[0];
+    expect(p.auto).toBeUndefined();
+    expect(p.pinned).toBeUndefined();
+    expect(JSON.stringify(app.saved().planned)).toBe(before);
+  });
+
+  it('the weekends box can only be used while balancing is on', () => {
+    openPlanner(saved({ plans: [plan()] }));
+    edit();
+    expect(app.$('planWeekends').disabled).toBe(true);
+    expect(app.$('planWeekendsHint').hidden).toBe(false);
+    app.$('planAutoFill').checked = true;
+    change(app.$('planAutoFill'));
+    expect(app.$('planWeekends').disabled).toBe(false);
+    expect(app.$('planWeekendsHint').hidden).toBe(true);
+  });
+
+  it('turning weekends on or off spreads the plan again', () => {
+    openPlanner(saved({ plans: [auto()] }));
+    edit();
+    app.$('planWeekends').checked = true;
+    submit(app.$('planForm'));
+    expect(app.saved().plans[0].weekends).toBe(true);
+    expect(minutes([0, 3, 4, 10])).toEqual([60, 60, 60, 45]);
+    edit();
+    app.$('planWeekends').checked = false;
+    submit(app.$('planForm'));
+    expect(app.saved().plans[0].weekends).toBeUndefined();
+    expect(minutes(weekdays)).toEqual(Array(8).fill(75));
+    expect(minutes([3, 4])).toEqual([0, 0]);
+  });
+
+  it('a new plan can have weekends on', () => {
+    openPlanner(saved());
+    app.$('newPlanBtn').click();
+    app.$('planName').value = 'Exam';
+    app.$('planSubjects').querySelector('[data-subject="s1"]').click();
+    app.$('planDeadline').value = day(10);
+    app.$('planHours').value = '10';
+    app.$('planWeekends').checked = true;
+    submit(app.$('planForm'));
+    const p = app.saved().plans[0];
+    expect(p).toMatchObject({ auto: true, weekends: true });
+    expect(app.saved().planned[day(3)][p.id]).toBe(60); // Saturday
+  });
+
+  it('Spread the missing hours keeps the days you planned by hand', () => {
+    openPlanner(saved({ plans: [plan()], planned: { [day(1)]: { p1: 60 } } }));
+    app.$('autoFillBtn').click();
+    expect(app.saved().planned[day(1)].p1).toBe(60);
+    expect(app.saved().plans[0].pinned).toEqual([day(1)]);
+    expect(app.run(`plannedFrom(planById('p1'))`)).toBe(600);
+  });
+});
+
+describe('finished plans', () => {
+  const data = (extra = {}) => saved({
+    plans: [
+      plan(),
+      plan({ id: 'p2', name: 'Done plan', subjectId: 's2', deadline: day(5), needMin: 60 }),
+      plan({ id: 'p3', name: 'Late plan', deadline: day(-3) }),
+    ],
+    planHistory: { [day(-1)]: { p2: 60 * MIN, p3: 30 * MIN } }, ...extra,
+  });
+  const items = (el) => [...el.children].filter((c) => c.classList.contains('pl-item'));
+  const names = (el) => items(el).map((i) => i.querySelector('.pl-name').textContent);
+  const finishedBox = () => app.$('planList').querySelector('.pl-finished');
+  const settle = async () => { await Promise.resolve(); await Promise.resolve(); };
+
+  it('moves done and expired plans to a collapsed Finished section, most recent deadline first', () => {
+    openPlanner(data());
+    expect(names(app.$('planList'))).toEqual(['Calculus exam']);
+    expect(finishedBox().querySelector('summary').textContent).toBe('Finished (2)');
+    expect(finishedBox().open).toBe(false);
+    expect(names(finishedBox())).toEqual(['Done plan', 'Late plan']); // due Mon 2 Nov, then three days ago
+  });
+
+  it('keeps the Finished section open once you opened it', () => {
+    openPlanner(data());
+    finishedBox().open = true;
+    finishedBox().dispatchEvent(new app.window.Event('toggle'));
+    app.run('renderPlanner()');
+    expect(finishedBox().open).toBe(true);
+  });
+
+  it('offers Add more hours when done early, and Extend deadline when the date has passed', () => {
+    openPlanner(data());
+    expect([...finishedBox().querySelectorAll('.pl-actions button')].map((b) => b.textContent)).toEqual(['Add more hours', 'Extend deadline']);
+    finishedBox().querySelector('[data-act="extend"]').click();
+    expect(app.$('planFormTitle').textContent).toBe('Edit plan');
+    expect(app.window.document.activeElement.id).toBe('planDeadline');
+    app.$('planDialog').close();
+    finishedBox().querySelector('[data-act="more"]').click();
+    expect(app.window.document.activeElement.id).toBe('planHours');
+  });
+
+  it('a done plan with a past deadline gets Extend deadline, not Add more hours', () => {
+    openPlanner(saved({ plans: [plan({ deadline: day(-3), needMin: 30 })], planHistory: { [day(-4)]: { p1: 30 * MIN } } }));
+    expect([...finishedBox().querySelectorAll('.pl-actions button')].map((b) => b.textContent)).toEqual(['Extend deadline']);
+  });
+
+  it('a finished plan can be reopened by adding hours', () => {
+    openPlanner(data());
+    finishedBox().querySelector('[data-act="more"]').click();
+    app.$('planHours').value = '3';
+    submit(app.$('planForm'));
+    expect(finishedBox().querySelector('summary').textContent).toBe('Finished (1)');
+    expect(names(app.$('planList'))).toContain('Done plan');
+  });
+
+  it('lists the five most recent finished plans, with Show all for the rest', () => {
+    const old = Array.from({ length: 7 }, (_, i) => plan({ id: `o${i}`, name: `Old ${i}`, deadline: day(-10 - i) }));
+    openPlanner(saved({ plans: old }));
+    expect(finishedBox().querySelector('summary').textContent).toBe('Finished (7)');
+    expect(names(finishedBox())).toEqual(['Old 0', 'Old 1', 'Old 2', 'Old 3', 'Old 4']);
+    const more = finishedBox().querySelector('[data-act="showAll"]');
+    expect(more.textContent).toBe('Show all (7)');
+    more.click();
+    expect(names(finishedBox())).toHaveLength(7);
+    expect(finishedBox().querySelector('[data-act="showAll"]').textContent).toBe('Show fewer');
+  });
+
+  it('has no Show all while there are five or fewer', () => {
+    openPlanner(data());
+    expect(finishedBox().querySelector('[data-act="showAll"]')).toBeNull();
+  });
+
+  it('Clear finished asks first, then removes the finished plans with their hours and progress', async () => {
+    openPlanner(data({ planned: { [day(1)]: { p1: 60, p2: 30, p3: 15 } } }));
+    finishedBox().querySelector('[data-act="clearFinished"]').click();
+    expect(app.$('confirmTitle').textContent).toBe('Delete 2 finished plans?');
+    expect(app.$('confirmText').textContent).toContain('1 done, 1 past their deadline');
+    app.$('confirmNo').click();
+    await settle();
+    expect(app.state.plans).toHaveLength(3);
+    finishedBox().querySelector('[data-act="clearFinished"]').click();
+    app.$('confirmYes').click();
+    await settle();
+    expect(app.saved().plans.map((p) => p.id)).toEqual(['p1']);
+    expect(app.saved().planned).toEqual({ [day(1)]: { p1: 60 } });
+    expect(app.saved().planHistory).toEqual({});
+    expect(finishedBox()).toBeNull();
+  });
+
+  it("leaves done plans out of Today's plan", () => {
+    app = loadApp({ saved: data({ planned: { [day(0)]: { p1: 60, p2: 60 } } }) });
+    expect([...app.$('todayPlanList').querySelectorAll('.tp-name')].map((n) => n.textContent)).toEqual(['Calculus exam']);
+  });
+
+  it('picks a plan that is not done automatically, and tags the done one in Counts toward', () => {
+    app = loadApp({ saved: saved({
+      plans: [plan(), plan({ id: 'p3', name: 'Maths project', deadline: day(20) })],
+      settings: { ...BASE_SETTINGS, subjectId: 's1' },
+      planHistory: { [day(-1)]: { p1: 600 * MIN } },
+    }) });
+    expect(app.run('currentPlanId()')).toBe('p3'); // the soonest deadline is done, so the next one is picked
+    expect(app.$('planOptions').textContent).toContain('Exam · due 7 Nov · Done');
+  });
+
+  it('says so on the done screen when the session finishes the plan', async () => {
+    app = loadApp({ saved: saved({ plans: [plan({ needMin: 10 })], settings: { ...BASE_SETTINGS, subjectId: 's1' } }) });
+    app.$('startBtn').click();
+    expect(app.state.session.planDoneAtStart).toBe(false);
+    app.advance(10 * MIN);
+    app.$('endBtn').click();
+    app.$('confirmYes').click();
+    await settle();
+    expect(app.$('donePlan').hidden).toBe(false);
+    expect(app.$('donePlan').textContent).toBe('🎉 You finished “Calculus exam”');
+  });
+
+  it('says nothing when the plan is not done yet', async () => {
+    app = loadApp({ saved: saved({ plans: [plan({ needMin: 600 })], settings: { ...BASE_SETTINGS, subjectId: 's1' } }) });
+    app.$('startBtn').click();
+    app.advance(10 * MIN);
+    app.$('endBtn').click();
+    app.$('confirmYes').click();
+    await settle();
+    expect(app.$('donePlan').hidden).toBe(true);
+  });
+
+  it('says nothing when the plan was already done before the session', async () => {
+    app = loadApp({ saved: saved({
+      plans: [plan({ needMin: 10 })], settings: { ...BASE_SETTINGS, subjectId: 's1' },
+      planHistory: { [day(-1)]: { p1: 10 * MIN } },
+    }) });
+    app.$('startBtn').click();
+    app.advance(10 * MIN);
+    app.$('endBtn').click();
+    app.$('confirmYes').click();
+    await settle();
+    expect(app.$('donePlan').hidden).toBe(true);
   });
 });
