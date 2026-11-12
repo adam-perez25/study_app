@@ -151,6 +151,7 @@
       <div class="card">
         <p class="summary" id="doneSummary"></p>
         <p class="done-streak" id="doneStreak"></p>
+        <p class="done-streak" id="donePlan" hidden></p>
         <ul class="done-achievements" id="doneAchievements" hidden></ul>
         <ul id="taskListDone" class="tasks readonly"></ul>
       </div>
@@ -276,9 +277,8 @@
           <div id="planList" class="pl-list"></div>
           <div class="pl-aside-actions">
             <button id="autoFillBtn">Spread the missing hours</button>
-            <p class="summary">Shares each plan's missing hours over the weekdays left before its deadline, and keeps them balanced: change a day and it's pinned 📌 while the other days adjust, and time you miss moves to the days left.</p>
+            <p class="summary">Shares each plan's missing hours over the days left before its deadline (weekdays, unless the plan has weekends on; days off are skipped) and keeps them balanced: change a day and it's pinned 📌 while the other days adjust, and time you miss moves to the days left.</p>
             <p class="summary" id="autoFillStatus" role="status"></p>
-            <button id="deletePlanBtn" class="danger" hidden></button>
           </div>
         </aside>
         <div>
@@ -388,11 +388,14 @@
           <label>Deadline <input id="planDeadline" type="date"></label>
           <label>Hours needed <input id="planHours" type="number" min="0.5" max="500" step="0.5"></label>
         </div>
-        <label class="check"><input id="planAutoFill" type="checkbox" checked> Spread the hours over the weekdays before the deadline, and keep them balanced</label>
+        <label class="check"><input id="planAutoFill" type="checkbox" checked> Spread the hours over the days before the deadline, and keep them balanced</label>
+        <label class="check"><input id="planWeekends" type="checkbox"> Include weekends (Saturdays and Sundays)</label>
+        <p class="summary" id="planWeekendsHint" hidden>Weekends are only used when the hours are balanced automatically.</p>
+        <p class="plan-error hint" id="planDeadlineHint" role="status" hidden></p>
         <p class="plan-error" id="planError" role="alert"></p>
         <div class="confirm-buttons">
           <button type="button" id="planCancel">Cancel</button>
-          <button type="submit" class="primary">Save plan</button>
+          <button type="submit" id="planSubmit" class="primary">Save plan</button>
         </div>
       </form>
     </dialog>

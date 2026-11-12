@@ -38,7 +38,7 @@ Study Timer (v0.2.0, package `study-timer`) is a pomodoro-style Windows desktop 
 - Stats (~824): `dayKey`, `streaks`, `levelInfo`, `levelTable` (pure, rows of the all-levels popup), `renderStats/Bars/Heatmap`, `renderLevels`/`openLevels`.
 - Achievements: `ACHIEVEMENTS` (~1167), `checkAchievements`.
 - Share cards: `shareData`, `drawShareCard` (canvas to PNG data URL), `shareText`.
-- Planner (~1610): pure helpers `monthGrid`, `activePlans`, `defaultPlan`, `currentPlanId`, `planStudiedOn`/`planStudied`, `planPlanned`, `setPlanned`, `setByHand`, `copyDayToNext`, `rebalancePlan`/`rebalanceAll`, `planMissing`, `parseDuration`, `removePlan`. UI: `renderPlanner` (list, calendar, day panel), `renderTodayPlan` (start-screen card, redrawn by `updatePreview` and `renderSubjectPicker`), `renderPlanPick` ("Counts toward" radios, redrawn by `renderSubjectPicker`), the plan form (`openPlanForm`, `savePlanForm`). `planner` holds what the screen shows and isn't saved.
+- Planner (~1610): pure helpers `monthGrid`, `activePlans`, `defaultPlan`, `currentPlanId`, `planStudiedOn`/`planStudied`, `planPlanned`, `setPlanned`, `setByHand`, `copyDayToNext`, `rebalancePlan`/`rebalanceAll`, `pinSetByHand`, `planMissing`, `parseDuration`, `removePlan`, `planDone`/`planFinished`/`finishedPlans`, `setDayOff`/`isDayOff`, `hasManualTime`/`resetDay`, `planSubjectLock`, `planDeadlineLoss`. UI: `renderPlanner` (list with `planCard`/`planItem` and the collapsed Finished section, calendar, day panel), `renderTodayPlan` (start-screen card, redrawn by `updatePreview` and `renderSubjectPicker`), `renderPlanPick` ("Counts toward" radios, redrawn by `renderSubjectPicker`), the plan popup that does both New and Edit (`openPlanForm(plan?, focusId?)`, `savePlanForm`), `deletePlanFlow`, `clearFinishedFlow`. `planner` holds what the screen shows and isn't saved.
 - Settings: `applyTheme`.
 - `mini.js` renders the snapshot `{type,label,blockText,endsAt,pausedRemaining,waiting,totalMs}`.
 
@@ -47,13 +47,14 @@ Study Timer (v0.2.0, package `study-timer`) is a pomodoro-style Windows desktop 
 - `state`:
   - `settings` {hours, minutes, focusLen, shortLen, longLen, longEvery, noBreaks, dailyGoal, autoStartFocus, theme, subjectId, sound{chime,volume,muted}}
   - `tasks` [{id,text,done}]
-  - `session` null or {blocks,index,endsAt,pausedRemaining,startedAt,focusedMs,waiting,lastSeen,subjectId,planId}
+  - `session` null or {blocks,index,endsAt,pausedRemaining,startedAt,focusedMs,waiting,lastSeen,subjectId,planId,planDoneAtStart} (`planDoneAtStart`: was the plan already done, so `finishSession` can say "You finished …")
   - `history` {'YYYY-MM-DD': {subjectId|'none': ms}}
   - `sessionCount`, `sessionLog` ['YYYY-MM-DD']
   - `subjects` [{id,name,color 0-7,hidden,deleted?}]. Deleting keeps the subject with `hidden` and `deleted` set, so its `history` stays under it and Stats shows "Name (deleted)" (`subjectName`). Skip `deleted` ones wherever subjects are listed for editing or matched by name.
   - `achievements` {id: ISO date}
   - `records` {tasksDone, earlyStarts, lateStarts, longestSessionMs}
-  - `plans` [{id,name,type 'Exam'|'Project',subjectId,created,deadline,needMin,auto?,pinned?}]. A subject can have several active plans (deadline >= today). Progress comes only from `planHistory`. `auto` plans are kept balanced by `rebalancePlan`: `pinned` (day keys) keep what you set by hand (`setByHand` pins, also at 0), the unpinned weekdays from today to the deadline share `needMin − studiedBefore(today) − pinned`. `rebalanceAll` runs at boot and when the Planner opens, so missed time moves forward.
+  - `plans` [{id,name,type 'Exam'|'Project',subjectId,created,deadline,needMin,auto?,weekends?,pinned?}]. A subject can have several active plans (deadline >= today). Progress comes only from `planHistory`. A plan is done when studied >= `needMin` and finished when done or past its deadline (nothing is stored for that). `auto` plans are kept balanced by `rebalancePlan`: `pinned` (day keys) keep what you set by hand (`setByHand` pins, also at 0; turning `auto` on pins the days already set, `pinSetByHand`), the unpinned days from today to the deadline share `needMin − studiedBefore(today) − pinned`. Those are weekdays, or every day when `weekends` is set (only used with `auto`), and never `daysOff`. `rebalanceAll` runs at boot and when the Planner opens, so missed time moves forward.
+  - `daysOff` ['YYYY-MM-DD']: days balanced plans skip (all plans; hand-set time stays). Days before today are dropped at boot (`initPlanner`). Reset stats keeps it.
   - `planned` {'YYYY-MM-DD': {planId: minutes}}, whole minutes (typed, or − / + in 15-minute steps; auto-fill uses 15-minute pieces), at most 720 a day.
   - `planHistory` {'YYYY-MM-DD': {planId: ms}}: focus time of sessions done for a plan, added by `creditFocus` next to `history` when `session.planId` is set. Reset stats clears it.
   - `settings.planId`: the "Counts toward" choice on the start screen, a plan id, `'none'`, or null (pick automatically). `currentPlanId()` resolves it; `startSession` stores it as `session.planId`. Changing subject sets it back to null.

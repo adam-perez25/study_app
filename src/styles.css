@@ -460,6 +460,24 @@ body.paused .time { opacity: .5; }
 .pl-stat.warn { color: var(--warn); }
 .pl-aside-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .pl-aside-actions .summary { margin: 0; font-size: .82rem; }
+.pl-item { position: relative; }
+.pl-item .pl-name { padding-right: 62px; } /* room for the Edit and Delete buttons */
+.pl-tools { position: absolute; top: 6px; right: 6px; display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+.pl-item:hover .pl-tools, .pl-item:focus-within .pl-tools { opacity: 1; }
+@media (hover: none) { .pl-tools { opacity: 1; } }
+.pl-tools button { width: 28px; height: 28px; padding: 0; font-size: .95rem; line-height: 1; border-color: transparent; background: var(--card); }
+.pl-tools button:hover { border-color: var(--border); }
+.pl-actions { display: flex; gap: 8px; margin-top: 6px; }
+.pl-actions button, .pl-finished-foot button { padding: 5px 10px; font-size: .82rem; }
+.pl-finished { margin-top: 4px; }
+.pl-finished > summary { cursor: pointer; padding: 4px 0 8px; font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.pl-finished .pl-item { margin-bottom: 10px; }
+.pl-finished .pl-card { opacity: .8; }
+.pl-finished-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.cal .cell.dayoff { background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--warn) 12%, transparent) 6px 12px), var(--card); }
+.off-tag { font-size: .62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--warn); }
+.day-panel h2 .off-tag.on { margin-left: auto; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 16%, var(--card)); }
+.reset-note { margin: 8px 0 0; }
 .cal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .cal-head h2 { margin: 0 auto 0 4px; font-size: 1.05rem; }
 .cal-head button { padding: 6px 10px; }
@@ -520,7 +538,7 @@ body.paused .time { opacity: .5; }
 }
 .d-foot .sum { color: var(--muted); font-size: .9rem; }
 .d-foot .sum b { color: var(--text); }
-.d-foot .btns { display: flex; gap: 8px; }
+.d-foot .btns { display: flex; flex-wrap: wrap; gap: 8px; }
 /* "Counts toward" on the start screen: which plan the session is for */
 .plan-pick { margin-top: 12px; }
 .plan-pick[hidden] { display: none; }
@@ -541,6 +559,9 @@ body.paused .time { opacity: .5; }
 .plan-dialog .row { margin-top: 0; }
 .field-label { display: block; margin-bottom: 4px; font-size: .85rem; color: var(--muted); }
 .confirm .plan-error { color: var(--danger); font-size: .85rem; min-height: 1.2em; margin: -4px 0 0; }
+.confirm .plan-error.hint { color: var(--warn); }
+.confirm .plan-error[hidden] { display: none; }
+.check:has(input:disabled) { opacity: .55; }
 .subject-chips .chip:disabled { opacity: .45; text-decoration: line-through; cursor: not-allowed; filter: none; }
 
 /* Sound settings popup: scrolls inside itself in short windows */
